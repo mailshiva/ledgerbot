@@ -39,7 +39,7 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 DEFAULTS = {
     "database": {
-        "path": str(Path.home() / ".bank_parser" / "transactions.db"),
+        "path": str(Path.home() / ".bank_parser" / "transactions_raw.db"),
     },
     "watcher": {
         "folder":   str(Path.home() / "statements"),

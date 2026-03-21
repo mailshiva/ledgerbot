@@ -34,7 +34,7 @@ class DatabaseManager:
                 cfg = load_config()
                 db_path = cfg.db_path
             except Exception:
-                db_path = str(Path.home() / ".bank_parser" / "transactions.db")
+                db_path = str(Path.home() / ".bank_parser" / "transactions_raw.db")
 
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -69,7 +69,7 @@ class DatabaseManager:
                     total_debits REAL DEFAULT 0.0,
                     total_credits REAL DEFAULT 0.0
                 );
-                CREATE TABLE IF NOT EXISTS transactions (
+                CREATE TABLE IF NOT EXISTS transactions_raw (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     statement_id INTEGER,
                     bank_name TEXT,
@@ -84,8 +84,8 @@ class DatabaseManager:
                     raw_text TEXT,
                     created_at TEXT DEFAULT (datetime('now'))
                 );
-                CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
-                CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(transaction_type);
+                CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions_raw(date);
+                CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions_raw(transaction_type);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_statements_hash ON statements(file_hash);
             """)
         self.conn.commit()
@@ -95,10 +95,10 @@ class DatabaseManager:
         """Apply any schema migrations needed for existing databases."""
         existing = {
             row[1] for row in
-            self.conn.execute("PRAGMA table_info(transactions)").fetchall()
+            self.conn.execute("PRAGMA table_info(transactions_raw)").fetchall()
         }
         if "bank_name" not in existing:
-            self.conn.execute("ALTER TABLE transactions ADD COLUMN bank_name TEXT")
+            self.conn.execute("ALTER TABLE transactions_raw ADD COLUMN bank_name TEXT")
             self.conn.commit()
 
     # ------------------------------------------------------------------ #
@@ -170,7 +170,7 @@ class DatabaseManager:
         for t in transactions:
             try:
                 self.conn.execute(
-                    """INSERT INTO transactions
+                    """INSERT INTO transactions_raw
                        (statement_id, bank_name, date, description, amount,
                         transaction_type, merchant_name, category, balance,
                         confidence_score, raw_text)
@@ -201,10 +201,10 @@ class DatabaseManager:
     def _update_statement_totals(self, statement_id: int):
         self.conn.execute("""
             UPDATE statements SET
-                total_transactions = (SELECT COUNT(*) FROM transactions WHERE statement_id = ?),
-                total_debits  = (SELECT COALESCE(SUM(amount), 0) FROM transactions
+                total_transactions = (SELECT COUNT(*) FROM transactions_raw WHERE statement_id = ?),
+                total_debits  = (SELECT COALESCE(SUM(amount), 0) FROM transactions_raw
                                  WHERE statement_id = ? AND transaction_type = 'DEBIT'),
-                total_credits = (SELECT COALESCE(SUM(amount), 0) FROM transactions
+                total_credits = (SELECT COALESCE(SUM(amount), 0) FROM transactions_raw
                                  WHERE statement_id = ? AND transaction_type = 'CREDIT')
             WHERE id = ?
         """, (statement_id, statement_id, statement_id, statement_id))
@@ -260,20 +260,20 @@ class DatabaseManager:
                 COALESCE(SUM(CASE WHEN transaction_type='CREDIT' THEN amount ELSE 0 END), 0) as total_credits,
                 COALESCE(AVG(CASE WHEN transaction_type='DEBIT'  THEN amount END), 0)        as avg_debit,
                 COALESCE(MAX(amount), 0) as largest_transaction
-            FROM transactions
+            FROM transactions_raw
         """).fetchone())
         row["net"] = row["total_credits"] - row["total_debits"]
         return row
 
     def get_largest_transaction(self) -> Optional[Dict]:
         row = self.conn.execute(
-            "SELECT * FROM transactions ORDER BY amount DESC LIMIT 1"
+            "SELECT * FROM transactions_raw ORDER BY amount DESC LIMIT 1"
         ).fetchone()
         return dict(row) if row else None
 
     def get_transactions_by_merchant(self, merchant: str) -> List[Dict]:
         return [dict(r) for r in self.conn.execute(
-            "SELECT * FROM transactions WHERE merchant_name LIKE ? ORDER BY date DESC",
+            "SELECT * FROM transactions_raw WHERE merchant_name LIKE ? ORDER BY date DESC",
             (f"%{merchant}%",)
         ).fetchall()]
 
@@ -284,12 +284,12 @@ class DatabaseManager:
                 SUM(CASE WHEN transaction_type='DEBIT'  THEN amount ELSE 0 END) as spending,
                 SUM(CASE WHEN transaction_type='CREDIT' THEN amount ELSE 0 END) as income,
                 COUNT(*) as transaction_count
-            FROM transactions
+            FROM transactions_raw
             GROUP BY month ORDER BY month DESC
         """).fetchall()]
 
     def clear_all(self):
-        self.conn.execute("DELETE FROM transactions")
+        self.conn.execute("DELETE FROM transactions_raw")
         self.conn.execute("DELETE FROM statements")
         self.conn.commit()
 

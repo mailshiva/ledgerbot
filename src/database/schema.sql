@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS statements (
     total_credits       REAL    DEFAULT 0.0
 );
 
-CREATE TABLE IF NOT EXISTS transactions (
+CREATE TABLE IF NOT EXISTS transactions_raw (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     statement_id        INTEGER,
     bank_name           TEXT,                          -- denormalised for easy filtering
@@ -33,10 +33,10 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_transactions_date       ON transactions(date);
-CREATE INDEX IF NOT EXISTS idx_transactions_type       ON transactions(transaction_type);
-CREATE INDEX IF NOT EXISTS idx_transactions_merchant   ON transactions(merchant_name);
-CREATE INDEX IF NOT EXISTS idx_transactions_category   ON transactions(category);
+CREATE INDEX IF NOT EXISTS idx_transactions_date       ON transactions_raw(date);
+CREATE INDEX IF NOT EXISTS idx_transactions_type       ON transactions_raw(transaction_type);
+CREATE INDEX IF NOT EXISTS idx_transactions_merchant   ON transactions_raw(merchant_name);
+CREATE INDEX IF NOT EXISTS idx_transactions_category   ON transactions_raw(category);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_statements_hash  ON statements(file_hash);
 
 -- Migration: add bank_name to existing databases
