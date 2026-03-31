@@ -7,7 +7,7 @@ database (detected via SHA-256 hash), processes each new file, and exits.
 Designed to be called from cron or a shell script:
 
     # Every 30 minutes
-    */30 * * * * /path/to/venv/bin/python /path/to/bank_statement_parser_regex/watcher.py
+    */30 * * * * /path/to/venv/bin/python /path/to/credit_card_transactions/watcher.py
 
 Usage:
     python watcher.py                        # scan folder from config

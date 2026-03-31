@@ -7,6 +7,10 @@ Topics covered:
   3. Rule-based & ML transaction categorization
   4. Putting it all together in a TransactionProcessor
 
+For reprocessing incase categories are updated:
+
+python3 -m src.nlp.enrichment_pipeline --reprocess
+
 Requirements:
     pip install spacy rapidfuzz
     python -m spacy download en_core_web_sm
@@ -65,23 +69,57 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Whole Foods":    ["wholefds", "whole foods", "whole foods market"],
     "Netflix":        ["netflix"],
     "Spotify":        ["spotify"],
+    "Community Butcher": ["community butcher", "communitybutcher"],
     "Shell":          ["shell oil", "shell"],
+    "Public Trasportation": ["ozark regional transit"],
+    "Great Clips":     ["great clips", "greatclips"],
     "Chevron":        ["chevron"],
+    "Maverik":        ["maverik"],
+    "Phillips":        ["phillips 66"],
     "CVS Pharmacy":   ["cvs", "cvs/pharmacy"],
     "Walgreens":      ["walgreens"],
     "Delta Airlines": ["delta air", "delta airlines"],
     "United Airlines":["united airlines", "united air"],
+    "Jcpenny":        ["jcpenny"],
+    "Khols":          ["khols", "khols"],
+    "Marshalls":      ["marshalls"],
     "Starbucks":      ["starbucks"],
+    "Taco Bell":      ["taco bell"],
+    "Chipotle":       ["chipotle"],
+    "Chick-Fil-A":    ["chick-fil-a"],
     "Dunkin":         ["dunkin", "dd *dunkin"],
     "McDonald's":     ["mcdonalds", "mcdonald's"],
-    "Cheesecake Factory": ["cheesecake factory"],
+    "Popeyes":        ["popeyes"],
+    "Krispy Kreme":    ["krispy krime"],
+    "Burger King":    ["burgerking"],
     "Blue Bottle Coffee": ["blue bottle", "bluebottle coffee"],
     "Target":         ["target"],
+    "Braums":         ["braums", "Braums"],
+    "Landers":        ["landers", "landers", "landers"],
+    "Walmart":        ["walmart", "wm supercenter", "wm neighborhood"],
+    "Sams Club":      ["sams club"],
+    "Aldi":           ["aldi"],
+    "Dollar-General": ["dollar-general", "dollar general"],
+    "Dollar-Tree":     ["dollartree"],
+    "Malco":          ["malco"],
+    "Infiniti":      ["infiniti"],
+    "India Mart":     ["india mart", "indiamart", "namaste"],
+    "Asian Amigo":    ["asian amigo", "achau"],
+    "Bentonville Utilities": ["city of "],
     "Planet Fitness": ["planet fitness"],
+    "Bawarchi":      ["bawarchi"],
     "PayPal":         ["paypal"],
+    "Capital One":    ["Capital One"],
+    "Credit Re-Payment": ["online payment", "online payment" "Payment Thankyou"],
+    "Credit Cashback": ["credit reward", "credit travel"],
     "Venmo":          ["venmo"],
     "eBay":           ["ebay"],
     "Chase ATM":      ["atm withdrawal chase", "chase bank"],
+    "ATT":           ["att", "att wireless","att*bill"],
+    "Ultra Wireless": ["ultra wireless", "ultra"],
+    "Insurance": ["geico Auto", "statefarm"],
+    "Landers": ["landers"],
+    "Discount Tires": ["discount tires"]
 }
 
 # Noise patterns to strip before matching
@@ -183,29 +221,48 @@ def normalize_merchant(
 # Category taxonomy: category → (subcategory → merchant set)
 CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
     "Shopping": {
-        "Online":    {"Amazon", "eBay", "PayPal"},
-        "Retail":    {"Target"},
+        "Online":    {"Amazon", "eBay", "PayPal","Michael Kors", "Coach", "Hoka"},
+        "Retail":    {"Target", "Jcpenny", "Khols", "Marshalls", "Dollar-General", "Dollar-Tree", "Aldi", "Guess Who"},
+    },
+    "Utilities": {
+        "Water and Electricity": {"Bentonville Utilities"},
+        "Wireless & Internet": {"ATT", "Ultra Wireless"},
+        "Insurance": {"Insurance"}
+    },
+    "Entertainment": {
+        "Movies & TV": {"Malco", "Hulu", "Netflix", "Amazon Prime", "Disney Plus"}
+    },
+    "Car Related": {
+        "Car Service": {"Landers"},
+        "Car Tires": {"Discount Tires"},
     },
     "Food & Dining": {
-        "Coffee":    {"Starbucks", "Dunkin", "Blue Bottle Coffee"},
-        "Fast Food": {"McDonald's"},
-        "Restaurant":{"Cheesecake Factory"},
+        "Coffee":    {"Starbucks", "Dunkin", "Blue Bottle Coffee", "Krispy Kreme"},
+        "Fast Food": {"McDonald's", "Popeyes", "Burger King", "Chipotle", "Chick-Fil-A", "Taco Bell"},
+        "Restaurant":{"Chipotle", "Olive Garden", "Bawarchi", "Cuisine", "Panera", "Taj"},
         "Delivery":  {"Uber Eats"},
     },
     "Transportation": {
         "Rideshare": {"Uber"},
         "Airlines":  {"Delta Airlines", "United Airlines"},
-        "Gas":       {"Shell", "Chevron"},
+        "Gas":       {"Shell", "Chevron", "Maverik", "Phillips"},
     },
-    "Subscriptions": {
-        "Streaming": {"Netflix", "Spotify", "Amazon Prime"},
-        "Fitness":   {"Planet Fitness"},
+    "Kids Related": {
+        "Gymnastics":   {"Planet Fitness","Infiniti", "Fastlane", "Altitude", },
+        "Swimming": {"ACT Bentonville"}
     },
     "Groceries": {
-        "Supermarket": {"Whole Foods"},
+        "Supermarket": {"Whole Foods", "Walmart", "Sams Club","Aldi"},
+        "Desi Groceries": {"India Mart", "Asian Amigo", "Achau", "Namaste", "Community Butcher"},
+        "Dairy": {"Braums"}
+    },
+    "Banking": {
+        "Credit Card": {"Capital One", "Citi", "Bofa", "Robinhood", "Card Payment", "Credit Re-Payment", "Credit Cashback",},
     },
     "Health & Beauty": {
         "Pharmacy":  {"CVS Pharmacy", "Walgreens"},
+        "Beauty":   {"Great Clips"},
+        "Hospitals": {"Mercy", "Washington Regional", "North West Medical", "North West Health"}
     },
     "Transfers & ATM": {
         "ATM":       {"Chase ATM"},

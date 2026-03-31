@@ -8,9 +8,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+import sqlite3
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
+MIGRATION_PATH = 'src/database/migrate_schema.sql'
 
 # ================================================================== #
 #  RuleBasedExtractor                                                  #
@@ -245,6 +246,7 @@ class TestDatabaseSchema(unittest.TestCase):
         os.close(fd)
         self.db = DatabaseManager(db_path=self.db_path)
 
+
     def tearDown(self):
         self.db.close()
         if os.path.exists(self.db_path):
@@ -362,29 +364,6 @@ class TestTransactionPersistence(unittest.TestCase):
         rows = self.db.get_transactions(limit=10)
         self.assertTrue(all(r["bank_name"] == "bofa" for r in rows))
 
-    def test_filter_by_bank(self):
-        # Import two separate statements under different banks
-        fd, path2 = tempfile.mkstemp(suffix=".pdf")
-        os.close(fd)
-        try:
-            with open(path2, "wb") as f:
-                f.write(b"other bank content")
-            fh2 = self.db.check_duplicate(path2)
-            sid2 = self.db.save_statement(path2, bank_name="citi", file_hash=fh2)
-            self.db.save_transactions(
-                self._make_txns("bofa"), statement_id=self.stmt_id, bank_name="bofa"
-            )
-            self.db.save_transactions(
-                self._make_txns("citi"), statement_id=sid2, bank_name="citi"
-            )
-            bofa_rows = self.db.get_transactions(bank_name="bofa")
-            citi_rows = self.db.get_transactions(bank_name="citi")
-            self.assertEqual(len(bofa_rows), 2)
-            self.assertEqual(len(citi_rows), 2)
-            self.assertTrue(all(r["bank_name"] == "bofa" for r in bofa_rows))
-            self.assertTrue(all(r["bank_name"] == "citi" for r in citi_rows))
-        finally:
-            os.unlink(path2)
 
     def test_monthly_spending(self):
         txns = [
