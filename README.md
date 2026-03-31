@@ -67,7 +67,7 @@ python watcher.py /path/to/statements
 python watcher.py --dry-run
 
 # Schedule with cron — every 30 minutes
-*/30 * * * * /path/to/venv/bin/python /path/to/bank_statement_parser_regex/watcher.py
+*/30 * * * * /path/to/venv/bin/python /path/to/credit_card_transactions/watcher.py
 ```
 
 Configure the watch folder in `~/.bank_parser/config.yaml`:

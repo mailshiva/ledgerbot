@@ -8,9 +8,10 @@ Run each section independently; answers follow each exercise.
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 import sys
-sys.path.insert(0, "../..")  # allow importing transaction_processor from parent dir
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))  # project root
 
-from week2_nlp.transaction_processor import (
+from src.nlp.transaction_processor import (
     clean_description,
     normalize_merchant,
     TransactionProcessor,

@@ -87,7 +87,42 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions_raw(date);
                 CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions_raw(transaction_type);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_statements_hash ON statements(file_hash);
-            """)
+                
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    raw_id              INTEGER NOT NULL UNIQUE,        -- FK back to transactions_raw
+                    statement_id        INTEGER,
+                    bank_name           TEXT,
+                    date                TEXT    NOT NULL,
+                    description         TEXT    NOT NULL,               -- original, un-cleaned
+                    clean_description   TEXT,                           -- after regex cleaning
+                    amount              REAL    NOT NULL,
+                    transaction_type    TEXT    NOT NULL
+                            CHECK(transaction_type IN ('DEBIT','CREDIT','UNKNOWN')),
+                    balance             REAL,
+                    -- NLP-enriched columns
+                    merchant_name       TEXT,
+                    merchant_raw        TEXT,                           -- pre-normalisation merchant token
+                    category            TEXT    DEFAULT 'Uncategorized',
+                    subcategory         TEXT,                           -- e.g. 'Streaming' under 'Entertainment'
+                    location            TEXT,                           -- city / state extracted by spaCy GPE
+                    confidence_score    REAL    DEFAULT 0.0,            -- composite 0-1
+
+                    -- provenance
+                    enrichment_method   TEXT,   -- 'substring' | 'fuzzy' | 'spacy' | 'rules' | 'fallback'
+                    enriched_at         TEXT    DEFAULT (datetime('now')),
+                    FOREIGN KEY (raw_id)      REFERENCES transactions_raw(id),
+                    FOREIGN KEY (statement_id) REFERENCES statements(id)
+                    );
+
+                    -- 2. Indexes for the enriched table
+                    CREATE INDEX IF NOT EXISTS idx_txn_date       ON transactions(date);
+                    CREATE INDEX IF NOT EXISTS idx_txn_type       ON transactions(transaction_type);
+                    CREATE INDEX IF NOT EXISTS idx_txn_merchant   ON transactions(merchant_name);
+                    CREATE INDEX IF NOT EXISTS idx_txn_category   ON transactions(category);
+                    CREATE INDEX IF NOT EXISTS idx_txn_subcategory ON transactions(subcategory);
+                    CREATE INDEX IF NOT EXISTS idx_txn_raw_id     ON transactions(raw_id);
+                """)
         self.conn.commit()
         self._migrate()
 
@@ -214,13 +249,28 @@ class DatabaseManager:
     #  Read operations                                                     #
     # ------------------------------------------------------------------ #
 
+    def _active_table(self) -> str:
+        """Return 'transactions' if it has rows, else fall back to 'transactions_raw'."""
+        try:
+            row = self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'"
+            ).fetchone()
+            if row:
+                count = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+                if count > 0:
+                    return "transactions"
+        except Exception:
+            pass
+        return "transactions_raw"
+
     def get_transactions(self, limit: int = 100,
                          transaction_type: str = None,
                          start_date: str = None,
                          end_date: str = None,
                          merchant: str = None,
                          bank_name: str = None) -> List[Dict]:
-        query = "SELECT * FROM transactions WHERE 1=1"
+        table = self._active_table()
+        query = f"SELECT * FROM {table} WHERE 1=1"
         params: List[Any] = []
 
         if transaction_type:

@@ -1,154 +1,155 @@
 """
-Config Loader
-Reads ~/.bank_parser/config.yaml and exposes settings to the rest of the app.
+src/config.py
+─────────────
+Loads ~/.bank_parser/config.yaml and exposes a typed Config dataclass.
 
-Config file location: ~/.bank_parser/config.yaml
+This is the Week 1 config pattern, intact and extended with an [nlp]
+section for Week 2.
 
-Minimal example:
-    database:
-      path: /Users/you/Documents/bank_data/transactions.db
-
-Full example:
-    database:
-      path: /Users/you/Documents/bank_data/transactions.db
-
-    watcher:
-      folder:   /Users/you/Downloads/statements
-      log_file: /Users/you/.bank_parser/watcher.log
-
-    parser:
-      default_year: 2026
-      confidence_threshold: 0.5
-
-    cli:
-      date_format: "%Y-%m-%d"
-"""
-
-import os
-from pathlib import Path
-from typing import Any
-
-try:
-    import yaml
-    _YAML_AVAILABLE = True
-except ImportError:
-    _YAML_AVAILABLE = False
-
-CONFIG_DIR  = Path.home() / ".bank_parser"
-CONFIG_FILE = CONFIG_DIR / "config.yaml"
-
-DEFAULTS = {
-    "database": {
-        "path": str(Path.home() / ".bank_parser" / "transactions_raw.db"),
-    },
-    "watcher": {
-        "folder":   str(Path.home() / "statements"),
-        "log_file": str(Path.home() / ".bank_parser" / "watcher.log"),
-    },
-    "parser": {
-        "default_year": 2026,
-        "confidence_threshold": 0.5,
-    },
-    "cli": {
-        "date_format": "%Y-%m-%d",
-    },
-}
-
-
-class Config:
-    """Thin wrapper around the YAML config with dot-access helpers."""
-
-    def __init__(self, data: dict):
-        self._data = data
-
-    @property
-    def db_path(self) -> str:
-        return self._get("database", "path")
-
-    @property
-    def watch_folder(self) -> str:
-        return self._get("watcher", "folder")
-
-    @property
-    def watch_log_file(self) -> str:
-        return self._get("watcher", "log_file")
-
-    @property
-    def default_year(self) -> int:
-        return int(self._get("parser", "default_year"))
-
-    @property
-    def confidence_threshold(self) -> float:
-        return float(self._get("parser", "confidence_threshold"))
-
-    @property
-    def date_format(self) -> str:
-        return self._get("cli", "date_format")
-
-    def _get(self, section: str, key: str) -> Any:
-        return (
-            self._data
-            .get(section, {})
-            .get(key, DEFAULTS[section][key])
-        )
-
-    def __repr__(self) -> str:
-        return f"<Config db_path={self.db_path!r} watch_folder={self.watch_folder!r}>"
-
-
-def load_config() -> Config:
-    """
-    Load ~/.bank_parser/config.yaml, creating it with defaults if absent.
-    If pyyaml is not installed, returns a Config with all defaults and
-    prints a one-time warning so the user knows what to install.
-    """
-    if not _YAML_AVAILABLE:
-        print(
-            "⚠️  pyyaml is not installed — using default config values.\n"
-            "    Run: pip install pyyaml"
-        )
-        return Config({})
-
-    if not CONFIG_FILE.exists():
-        _create_default_config()
-
-    with open(CONFIG_FILE, "r") as f:
-        raw = yaml.safe_load(f) or {}
-
-    return Config(raw)
-
-
-def _create_default_config():
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-
-    default_yaml = f"""\
-# Bank Statement Parser - Configuration
-# Location: {CONFIG_FILE}
-
+~/.bank_parser/config.yaml minimal example
+-------------------------------------------
 database:
-  # Path to the SQLite database file (outside the project folder).
-  path: {DEFAULTS['database']['path']}
-
-watcher:
-  # Folder the watcher scans for new PDF statements.
-  folder: {DEFAULTS['watcher']['folder']}
-  # Log file written by the watcher on each run.
-  log_file: {DEFAULTS['watcher']['log_file']}
+  path: ~/.bank_parser/bank_statements.db
 
 parser:
-  # Year assumed when a PDF has no year in its dates (e.g. Robinhood MM/DD format).
-  default_year: {DEFAULTS['parser']['default_year']}
-  # Minimum confidence score (0-1) for a parsed transaction to be accepted.
-  confidence_threshold: {DEFAULTS['parser']['confidence_threshold']}
+  output_dir: ~/Documents/bank_exports
+  supported_banks:
+    - capital_one
+    - citi
+    - bofa
+    - robinhood
 
-cli:
-  # Date display format in terminal output.
-  date_format: "{DEFAULTS['cli']['date_format']}"
+nlp:
+  spacy_model: en_core_web_sm
+  fuzzy_threshold: 80
+
+Usage
+-----
+    from src.config import Config
+
+    cfg = Config.load()
+    print(cfg.db_path)       # PosixPath('/Users/you/.bank_parser/bank_statements.db')
+    print(cfg.spacy_model)   # 'en_core_web_sm'
 """
-    with open(CONFIG_FILE, "w") as f:
-        f.write(default_yaml)
 
-    print(f"📝  Created default config at: {CONFIG_FILE}")
-    print(f"    DB will be stored at      : {DEFAULTS['database']['path']}")
-    print(f"    Watcher will scan         : {DEFAULTS['watcher']['folder']}")
-    print(f"    Edit {CONFIG_FILE} to customise.\n")
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional
+
+import yaml
+
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Well-known locations  (same as Week 1)
+# ---------------------------------------------------------------------------
+
+CONFIG_DIR  = Path.home() / ".bank_parser"
+CONFIG_FILE = CONFIG_DIR  / "config.yaml"
+DEFAULT_DB  = CONFIG_DIR  / "bank_data.db"
+
+_DEFAULT_YAML = """\
+database:
+  path: ~/.bank_parser/bank_data.db
+
+parser:
+  output_dir: ~/Documents/bank_exports
+  supported_banks:
+    - capital_one
+    - citi
+    - bofa
+    - robinhood
+
+nlp:
+  spacy_model: en_core_web_sm
+  fuzzy_threshold: 80
+"""
+
+DEFAULTS = {
+    "database": {"path": "default_db.sqlite"},
+    "watcher": {"folder": "./statements", "log_file": "watcher.log"},
+    "parser": {"default_year": 2023}
+}
+
+# ---------------------------------------------------------------------------
+# Config dataclass
+# ---------------------------------------------------------------------------
+
+class Config:
+    def __init__(self, config_dict):
+        self.config_dict = config_dict
+        db_section      = config_dict.get("database", {})
+        parser_section  = config_dict.get("parser", {})
+        watcher_section = config_dict.get("watcher", {})
+        nlp_section     = config_dict.get("nlp", {})
+
+        # Store raw values so Config({}) returns exactly what was passed in
+        self.db_path         = db_section.get("path", DEFAULTS["database"]["path"])
+        self.watch_folder    = watcher_section.get("folder",   DEFAULTS["watcher"]["folder"])
+        self.watch_log_file  = watcher_section.get("log_file", DEFAULTS["watcher"]["log_file"])
+        self.default_year    = parser_section.get("default_year", DEFAULTS["parser"]["default_year"])
+        self.output_dir      = parser_section.get("output_dir", "~/statements")
+        self.supported_banks = parser_section.get("supported_banks", ["capital_one", "citi", "bofa", "robinhood"])
+        self.spacy_model     = nlp_section.get("spacy_model", "en_core_web_sm")
+        self.fuzzy_threshold = int(nlp_section.get("fuzzy_threshold", 80))
+
+    # ------------------------------------------------------------------
+    # Factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def load(cls, config_path: Optional[Path] = None) -> "Config":
+        """
+        Load from *config_path* (default: ~/.bank_parser/config.yaml).
+
+        Creates the file with sensible defaults on first run so the user
+        doesn't need to create it manually.
+        """
+        path = Path(config_path) if config_path else CONFIG_FILE
+
+        if not path.exists():
+            log.info("Config not found at %s – writing defaults.", path)
+            cls._write_default(path)
+
+        raw = yaml.safe_load(path.read_text()) or {}
+
+        cfg = cls(raw)
+        # Expand ~ but don't resolve() — resolve() adds /private/ prefix on macOS symlinks
+        cfg.db_path = Path(cfg.db_path).expanduser()
+        cfg.output_dir = Path(cfg.output_dir).expanduser()
+        log.debug("Config loaded  db_path=%s", cfg.db_path)
+        return cfg
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _write_default(path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_DEFAULT_YAML)
+        log.info("Default config written to %s", path)
+
+    def ensure_db_dir(self) -> None:
+        """Create the parent directory for the DB file if it doesn't exist."""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def load_config(config_path=None) -> "Config":
+    """
+    Load config from YAML, falling back to ~/sqlLite_DB/bank_data.db if not found.
+
+    This is the function imported by DatabaseManager.
+    """
+    path = Path(config_path) if config_path else CONFIG_FILE
+
+    if path.exists():
+        raw = yaml.safe_load(path.read_text()) or {}
+        db_raw = raw.get("database", {}).get("path") or str(Path.home() / "sqlLite_DB" / "bank_data.db")
+    else:
+        db_raw = str(Path.home() / "sqlLite_DB" / "bank_data.db")
+
+    return Config({"database": {"path": db_raw}})

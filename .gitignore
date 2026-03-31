@@ -21,6 +21,11 @@ data/samples/*.csv
 *.log
 ~/.bank_parser/
 
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
 # macOS
 .DS_Store
 .DS_Store?
