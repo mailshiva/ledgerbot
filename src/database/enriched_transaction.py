@@ -99,6 +99,47 @@ ON CONFLICT(raw_id) DO UPDATE SET
     enriched_at        = excluded.enriched_at;
 """
 
+def _to_dict(e: "EnrichedTransaction") -> dict:
+    """Convert EnrichedTransaction dataclass to a plain dict for upsert."""
+    return {
+        "raw_id":            e.raw_id,
+        "statement_id":      e.statement_id,
+        "bank_name":         e.bank_name,
+        "date":              e.date,
+        "description":       e.description,
+        "clean_description": e.clean_description,
+        "amount":            e.amount,
+        "transaction_type":  e.transaction_type,
+        "balance":           e.balance,
+        "merchant_name":     e.merchant_name,
+        "merchant_raw":      e.merchant_raw,
+        "category":          e.category,
+        "subcategory":       e.subcategory,
+        "location":          e.location,
+        "confidence_score":  e.confidence_score,
+        "enrichment_method": e.enrichment_method,
+    }
+
+
+def bulk_upsert_dual(db, enriched: list["EnrichedTransaction"]) -> None:
+    """
+    Dual-write version of bulk_upsert.
+    Accepts a DualWriteManager — writes to SQLite + Supabase atomically.
+    Falls back to plain sqlite3.Connection for tests (backward compatible).
+    """
+    if not enriched:
+        return
+
+    # Plain sqlite3.Connection → existing behaviour (used in tests)
+    if isinstance(db, sqlite3.Connection):
+        bulk_upsert(db, enriched)
+        return
+
+    # DualWriteManager → dual write
+    rows = [_to_dict(e) for e in enriched]
+    db.upsert_transactions_bulk(rows)
+
+
 
 def bulk_upsert(conn: sqlite3.Connection, rows: Sequence[EnrichedTransaction]) -> int:
     """

@@ -59,6 +59,26 @@ AGENT_SYSTEM_PROMPT = (
     "- get_categories()                       All distinct category values\n"
     "- get_merchants(limit)                   Top merchants by transaction count\n"
     "- summarize_spending(month, category)    Pre-computed aggregation for a month/category\n\n"
+    "MERCHANT ALIASES\n"
+    "----------------\n"
+    "Some merchants appear under multiple name variants in merchant_name. "
+    "Always expand these to cover all known variants using OR conditions:\n"
+    "- Walmart  → LIKE '%walmart%' OR LIKE '%wal-mart%' OR LIKE '%wmsupercenter%' OR LIKE '%wal mart%'\n"
+    "- Amazon   → LIKE '%amazon%' OR LIKE '%amzn%'\n"
+    "- Target   → LIKE '%target%'\n"
+    "- Costco   → LIKE '%costco%'\n"
+    "- McDonald's → LIKE '%mcdonald%' OR LIKE '%mcdonalds%'\n"
+    "- Starbucks → LIKE '%starbucks%' OR LIKE '%sbux%'\n"
+    "When in doubt about a merchant, use OR across both merchant_name and description.\n\n"
+    "TOOL RESULT FIELDS\n"
+    "------------------\n"
+    "summarize_spending returns: total_spent (sum of DEBITs), total_received (sum of CREDITs),\n"
+    "  transaction_count, avg_debit, largest_transaction, period_start, period_end.\n"
+    "- 'How much did I spend?' → report total_spent\n"
+    "- 'How much did I earn/receive?' → report total_received\n"
+    "- NEVER report largest_transaction as the answer to a total-spending question.\n"
+    "- For broad categories like 'food', query both 'Food' AND 'Groceries' separately\n"
+    "  and sum total_spent across both results.\n\n"
     "RULES\n"
     "-----\n"
     "1. Always use tools to fetch real data - never invent numbers.\n"
@@ -100,6 +120,20 @@ SQL: SELECT date, clean_description, amount
             OR clean_description LIKE '%starbucks%')
        AND date BETWEEN '2025-01-01' AND '2025-01-31'
      ORDER BY date;
+
+Q: How much did I spend at Walmart by month in 2025?
+SQL: SELECT strftime('%Y-%m', date) AS month, ROUND(SUM(amount), 2) AS total_spent
+     FROM transactions
+     WHERE transaction_type = 'DEBIT'
+       AND (merchant_name LIKE '%walmart%'
+            OR merchant_name LIKE '%wal-mart%'
+            OR merchant_name LIKE '%wmsupercenter%'
+            OR description LIKE '%walmart%'
+            OR description LIKE '%wal-mart%'
+            OR description LIKE '%wmsupercenter%')
+       AND strftime('%Y', date) = '2025'
+     GROUP BY month
+     ORDER BY month;
 
 Q: Did I have any duplicate charges last month?
 SQL: SELECT merchant_name, amount, COUNT(*) AS cnt

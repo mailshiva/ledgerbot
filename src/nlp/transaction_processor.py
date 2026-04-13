@@ -64,6 +64,9 @@ class Transaction:
 MERCHANT_ALIASES: dict[str, list[str]] = {
     "Amazon":         ["amzn", "amazon", "amzn*mktp"],
     "Amazon Prime":   ["amazon prime"],
+    "Disney Plus":     ["disney plus"],
+    "Temu":           ["temu.com", "temuus"],
+    "Shein":          ["shein.com", "sheinus"],
     "Uber":           ["uber *trip", "uber trip"],
     "Uber Eats":      ["uber eats", "ubereats"],
     "Whole Foods":    ["wholefds", "whole foods", "whole foods market"],
@@ -82,6 +85,7 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "United Airlines":["united airlines", "united air"],
     "Jcpenny":        ["jcpenny"],
     "Khols":          ["khols", "khols"],
+    "Macys":          ["Macys"],
     "Marshalls":      ["marshalls"],
     "Starbucks":      ["starbucks"],
     "Taco Bell":      ["taco bell"],
@@ -106,6 +110,7 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "India Mart":     ["india mart", "indiamart", "namaste"],
     "Asian Amigo":    ["asian amigo", "achau"],
     "Bentonville Utilities": ["city of "],
+    "Bentonville Community Center": ["act*bentonville"],
     "Planet Fitness": ["planet fitness"],
     "Bawarchi":      ["bawarchi"],
     "PayPal":         ["paypal"],
@@ -119,7 +124,9 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Ultra Wireless": ["ultra wireless", "ultra"],
     "Insurance": ["geico Auto", "statefarm"],
     "Landers": ["landers"],
-    "Discount Tires": ["discount tires"]
+    "Discount Tires": ["discount tires"],
+    "Guess Who": ["guesswho"],
+    "Bentonville Eye Care": ["eyecare"]
 }
 
 # Noise patterns to strip before matching
@@ -221,8 +228,9 @@ def normalize_merchant(
 # Category taxonomy: category → (subcategory → merchant set)
 CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
     "Shopping": {
-        "Online":    {"Amazon", "eBay", "PayPal","Michael Kors", "Coach", "Hoka"},
-        "Retail":    {"Target", "Jcpenny", "Khols", "Marshalls", "Dollar-General", "Dollar-Tree", "Aldi", "Guess Who"},
+        "Online":    {"Amazon", "eBay", "PayPal","Michael Kors", "Coach", "Hoka", "Shein", "Temu"},
+        "Retail":    {"Target", "Jcpenny", "Khols", "Macys", "Marshalls", "Dollar-General",
+                      "Dollar-Tree", "Aldi", "GuessWho",},
     },
     "Utilities": {
         "Water and Electricity": {"Bentonville Utilities"},
@@ -243,13 +251,13 @@ CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
         "Delivery":  {"Uber Eats"},
     },
     "Transportation": {
-        "Rideshare": {"Uber"},
+        "Rideshare": {"Uber", "Public Trasportation"},
         "Airlines":  {"Delta Airlines", "United Airlines"},
         "Gas":       {"Shell", "Chevron", "Maverik", "Phillips"},
     },
     "Kids Related": {
         "Gymnastics":   {"Planet Fitness","Infiniti", "Fastlane", "Altitude", },
-        "Swimming": {"ACT Bentonville"}
+        "BCC Lessons": {"Bentonville Community Center"}
     },
     "Groceries": {
         "Supermarket": {"Whole Foods", "Walmart", "Sams Club","Aldi"},
@@ -262,7 +270,7 @@ CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
     "Health & Beauty": {
         "Pharmacy":  {"CVS Pharmacy", "Walgreens"},
         "Beauty":   {"Great Clips"},
-        "Hospitals": {"Mercy", "Washington Regional", "North West Medical", "North West Health"}
+        "Hospitals": {"Mercy", "Washington Regional", "North West Medical", "North West Health", "Bentonville Eye Care"}
     },
     "Transfers & ATM": {
         "ATM":       {"Chase ATM"},

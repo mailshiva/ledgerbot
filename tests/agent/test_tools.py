@@ -7,6 +7,10 @@ fixture data. No real DB file, no LLM calls, no network.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 import sqlite3
 from unittest.mock import MagicMock
 
@@ -22,6 +26,7 @@ from src.agent.tools import (
     get_statements,
     get_spending_by_month,
     get_uncategorized,
+    get_subcategory_summary,
     query_db,
     summarize_spending,
     _has_enriched_table,
@@ -470,6 +475,84 @@ class TestGetStatements:
         banks = [r["bank_name"] for r in result]
         assert "capital_one" in banks
 
+class TestGetSubcategorySummary:
+    def test_returns_list(self, db):
+        result = get_subcategory_summary(db)
+        assert isinstance(result, list)
+
+    def test_has_expected_fields(self, db):
+        result = get_subcategory_summary(db)
+        for row in result:
+            assert "subcategory" in row
+            assert "category" in row
+            assert "transaction_count" in row
+            assert "total_spent" in row
+            assert "avg_transaction" in row
+            assert "min_amount" in row
+            assert "max_amount" in row
+
+    def test_excludes_null_subcategories(self, db):
+        result = get_subcategory_summary(db)
+        assert all(r["subcategory"] is not None for r in result)
+
+    def test_excludes_credits(self, db):
+        # Income / credits should never appear in subcategory spending summary
+        result = get_subcategory_summary(db)
+        categories = [r["category"] for r in result]
+        assert "Income" not in categories
+
+    def test_subcategory_filter_partial_match(self, db):
+        # 'stream' should match 'Streaming'
+        result = get_subcategory_summary(db, subcategory="stream")
+        assert len(result) >= 1
+        assert all("stream" in r["subcategory"].lower() for r in result)
+
+    def test_subcategory_filter_exact(self, db):
+        result = get_subcategory_summary(db, subcategory="Streaming")
+        assert len(result) == 1
+        assert result[0]["subcategory"] == "Streaming"
+        # Two Netflix rows in fixture
+        assert result[0]["transaction_count"] == 2
+        assert result[0]["total_spent"] == pytest.approx(31.98, abs=0.01)
+
+    def test_month_filter(self, db):
+        result = get_subcategory_summary(db, month="2025-02")
+        # Feb only has citi transactions
+        assert all(r["total_spent"] > 0 for r in result)
+        months_in_result = {r.get("month") for r in result}
+        # No month column returned — verify indirectly via known Feb subcategories
+        subcats = {r["subcategory"] for r in result}
+        assert "Supermarket" in subcats or "Rideshare" in subcats
+
+    def test_bank_name_filter(self, db):
+        result = get_subcategory_summary(db, bank_name="citi")
+        assert len(result) >= 1
+        # All returned rows must come from citi transactions only
+
+    def test_ordered_by_total_spent_desc(self, db):
+        result = get_subcategory_summary(db)
+        spends = [r["total_spent"] for r in result]
+        assert spends == sorted(spends, reverse=True)
+
+    def test_combined_filters(self, db):
+        result = get_subcategory_summary(db, month="2025-01", subcategory="Streaming")
+        assert len(result) == 1
+        assert result[0]["total_spent"] == pytest.approx(31.98, abs=0.01)
+
+    def test_raw_fallback(self, db_raw_only):
+        # transactions_raw has no subcategory column — should return empty list
+        # gracefully rather than crashing
+        result = get_subcategory_summary(db_raw_only)
+        assert isinstance(result, list)
+
+    def test_dispatch_via_execute_tool(self, db):
+        result = execute_tool("get_subcategory_summary", db, subcategory="Coffee")
+        assert isinstance(result, list)
+
+    def test_tool_registered_in_definitions(self):
+        names = {t["function"]["name"] for t in TOOL_DEFINITIONS}
+        assert "get_subcategory_summary" in names
+
 
 # ---------------------------------------------------------------------------
 # execute_tool dispatcher
@@ -512,8 +595,8 @@ class TestToolDefinitions:
         expected = {
             "query_db", "get_categories", "get_merchants",
             "summarize_spending", "get_spending_by_month",
-            "find_transactions", "detect_duplicates",
-            "get_uncategorized", "get_statements",
+            "find_transactions", "detect_duplicates", "get_category_subcategories",
+            "get_uncategorized", "get_statements","get_subcategory_summary",
         }
         assert names == expected
 

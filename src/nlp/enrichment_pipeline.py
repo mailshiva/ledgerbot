@@ -8,6 +8,14 @@ the `transactions` table.
 db_path is loaded from ~/.bank_parser/config.yaml exactly the way
 Week 1 code did it – via src.config.Config.load().
 
+Write behaviour (dual-write):
+    All upserts go to SQLite AND Supabase atomically.
+    If Supabase fails, SQLite is rolled back — no partial state.
+
+Read behaviour:
+    Pipeline-internal reads (count, fetch batch, skip-check) use SQLite
+    directly for speed. Agent queries go to Supabase via DualWriteManager.
+
 Usage
 -----
     # run with default config (~/.bank_parser/config.yaml)
@@ -26,6 +34,12 @@ Usage
     from src.nlp.enrichment_pipeline import EnrichmentPipeline
     pipeline = EnrichmentPipeline()      # reads ~/.bank_parser/config.yaml
     stats    = pipeline.run()
+
+    # inject an existing DualWriteManager (e.g. from main.py or tests):
+    from src.database.dual_write_manager import DualWriteManager
+    db = DualWriteManager(str(Path.home() / "sqlLite_DB" / "bank_data.db"))
+    pipeline = EnrichmentPipeline(db=db)
+    stats = pipeline.run()
 """
 
 from __future__ import annotations
@@ -48,8 +62,10 @@ from src.nlp.transaction_processor import TransactionProcessor, Transaction
 from src.database.enriched_transaction import (
     EnrichedTransaction,
     apply_migration,
-    bulk_upsert,
+    bulk_upsert,        # kept for backward-compat (tests pass raw sqlite3.Connection)
+    bulk_upsert_dual,   # dual-write aware version used in production
 )
+from src.database.dual_write_manager import DualWriteManager
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +128,11 @@ class EnrichmentPipeline:
     sql_migration_path:
         Optional path to migrate_schema.sql.  When None, the inline DDL
         inside enriched_transaction.py is used.
+    db:
+        Optional DualWriteManager instance.  When provided, it is used
+        directly and no new connection is created.  When None (default),
+        a DualWriteManager is constructed from config_path so that all
+        existing CLI usage continues to work unchanged.
     """
 
     def __init__(
@@ -120,6 +141,7 @@ class EnrichmentPipeline:
         batch_size: int = BATCH_SIZE,
         reprocess_all: bool = False,
         sql_migration_path: Optional[Path] = None,
+        db: Optional[DualWriteManager] = None,  # ← injected or auto-created
     ) -> None:
         # ── Load config the Week 1 way ────────────────────────────────
         self.cfg = Config.load(config_path)
@@ -129,6 +151,17 @@ class EnrichmentPipeline:
         self.batch_size         = batch_size
         self.reprocess_all      = reprocess_all
         self.sql_migration_path = sql_migration_path
+
+        # ── Set up dual-write manager ─────────────────────────────────
+        # Accept an injected DualWriteManager (e.g. from main.py so the
+        # same connection is shared) or create one from config so that
+        # plain CLI usage requires zero changes.
+        if db is not None:
+            self._db = db
+            log.info("Using injected DualWriteManager")
+        else:
+            self._db = DualWriteManager(str(self.cfg.db_path))
+            log.info("Created DualWriteManager from config")
 
         # ── Load spaCy / NLP model once per pipeline instance ────────
         log.info("Loading NLP model (%s)…", self.cfg.spacy_model)
@@ -151,47 +184,48 @@ class EnrichmentPipeline:
         stats = PipelineStats()
         t0    = time.time()
 
-        conn = self._open_db()
-        try:
-            apply_migration(conn, self.sql_migration_path)
+        # Pipeline-internal reads (count, fetch, skip-check) always use
+        # SQLite directly — fast local reads, no network round-trips.
+        # DualWriteManager owns the connection lifecycle; we never close it here.
+        conn = self._db.sqlite.conn
+        apply_migration(conn, self.sql_migration_path)
 
-            stats.total_raw = self._count_raw(conn, statement_id)
-            log.info(
-                "transactions_raw rows to process: %d (statement_id=%s)",
-                stats.total_raw, statement_id,
-            )
+        stats.total_raw = self._count_raw(conn, statement_id)
+        log.info(
+            "transactions_raw rows to process: %d (statement_id=%s)",
+            stats.total_raw, statement_id,
+        )
 
-            offset = 0
-            while True:
-                raw_rows = self._fetch_batch(conn, statement_id, offset)
-                if not raw_rows:
-                    break
+        offset = 0
+        while True:
+            raw_rows = self._fetch_batch(conn, statement_id, offset)
+            if not raw_rows:
+                break
 
-                enriched_batch: List[EnrichedTransaction] = []
-                for row in raw_rows:
-                    if self._should_skip(conn, row["id"]):
-                        stats.skipped += 1
-                        continue
-                    try:
-                        enriched = self._enrich_row(row)
-                        enriched_batch.append(enriched)
-                        stats.processed += 1
-                    except Exception as exc:
-                        log.warning(
-                            "Enrichment failed for raw_id=%s: %s", row["id"], exc
-                        )
-                        stats.errors += 1
-
-                if enriched_batch:
-                    bulk_upsert(conn, enriched_batch)
-                    log.debug(
-                        "Upserted %d rows (offset=%d)", len(enriched_batch), offset
+            enriched_batch: List[EnrichedTransaction] = []
+            for row in raw_rows:
+                if self._should_skip(conn, row["id"]):
+                    stats.skipped += 1
+                    continue
+                try:
+                    enriched = self._enrich_row(row)
+                    enriched_batch.append(enriched)
+                    stats.processed += 1
+                except Exception as exc:
+                    log.warning(
+                        "Enrichment failed for raw_id=%s: %s", row["id"], exc
                     )
+                    stats.errors += 1
 
-                offset += self.batch_size
+            if enriched_batch:
+                # Dual-write: SQLite first, then Supabase.
+                # Rolls back SQLite automatically if Supabase fails.
+                bulk_upsert_dual(self._db, enriched_batch)
+                log.debug(
+                    "Dual-upserted %d rows (offset=%d)", len(enriched_batch), offset
+                )
 
-        finally:
-            conn.close()
+            offset += self.batch_size
 
         stats.elapsed_seconds = time.time() - t0
         log.info(str(stats))
@@ -201,13 +235,9 @@ class EnrichmentPipeline:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _open_db(self) -> sqlite3.Connection:
-        """Open a connection using the db_path from config."""
-        conn = sqlite3.connect(self.cfg.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        return conn
+    # NOTE: _open_db() is intentionally removed.
+    # The pipeline no longer owns connection lifecycle — DualWriteManager does.
+    # All internal reads use self._db.sqlite.conn directly.
 
     def _count_raw(
         self, conn: sqlite3.Connection, statement_id: Optional[int]
@@ -356,6 +386,8 @@ def main() -> None:
         datefmt = "%H:%M:%S",
     )
 
+    # DualWriteManager is created inside __init__ from config.
+    # CLI usage is completely unchanged — no new flags needed.
     pipeline = EnrichmentPipeline(
         config_path        = Path(args.config) if args.config else None,
         batch_size         = args.batch_size,

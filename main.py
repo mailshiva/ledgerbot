@@ -16,6 +16,7 @@ Usage:
   python main.py chat                    # Default: Claude
   python main.py chat --model qwen3:8b    # Use Ollama
   python main.py chat --provider ollama
+  python main.py chat --model claude-haiku-4-5-20251001
   
 Interactive:
   > How much did I spend on food in February?
@@ -40,14 +41,15 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.llm.config import LLMConfig, Model
 from src.llm.client import LLMClient
-from src.agent.agent import Agent
-from src.database.db_manager import DatabaseManager
+#from src.agent.agent import Agent
+from src.agent.graph import GraphAgent as Agent
+from src.database.dual_write_manager import DualWriteManager
 
 
 class CLIAgent:
     """CLI wrapper for the Agent with session tracking and pretty printing."""
-    
-    def __init__(self, provider: str = "gemini", model_name: str = None):
+
+    def __init__(self, provider: str = "gemini", model_name: str = None, db_source: str = "supa"):
         """
         Initialize CLI agent.
         
@@ -56,6 +58,7 @@ class CLIAgent:
             model_name: specific model name or None for provider default
         """
         self.provider = provider.lower()
+        self.db_source = db_source.lower()
         self.session_start = datetime.now()
         self.turns = []
         
@@ -75,8 +78,9 @@ class CLIAgent:
             config = LLMConfig(default_model=model)
             config.validate()  # Will raise if API key missing
             self.llm_client = LLMClient(config)
-            self.db = DatabaseManager(str(Path.home() / "sqlLite_DB" / "bank_data.db"))
-            self.agent = Agent(db=self.db, llm_client=self.llm_client, max_turns=5)
+            #self.db = DatabaseManager(str(Path.home() / "sqlLite_DB" / "bank_data.db"))
+            self.db = DualWriteManager(str(Path.home() / "sqlLite_DB" / "bank_data.db"), read_source=self.db_source)
+            self.agent = Agent(db=self.db, llm_client=self.llm_client, max_iterations=5)
             
             self.model_name = model.value
             print(f"✓ Agent initialized")
@@ -239,6 +243,14 @@ Examples:
         "--db",
         help="Path to SQLite database (default: ~/sqlLite_DB/bank_data.db)"
     )
+
+    parser.add_argument(
+        "--db-source",
+        default="supa",
+        choices=["supa", "sqlite"],
+        dest="db_source",
+        help="Preferred read source: 'supa' (Supabase first, SQLite fallback) or 'sqlite' (SQLite first, Supabase fallback). Default: supa"
+    )
     
     args = parser.parse_args()
     
@@ -249,14 +261,14 @@ Examples:
     if args.command == "test":
         # Quick test
         print("Running quick test...")
-        cli = CLIAgent(provider=args.provider, model_name=args.model)
+        cli = CLIAgent(provider=args.provider, model_name=args.model, db_source=args.db_source)
         cli.chat("How much did I spend?")
         cli.print_session_summary()
         sys.exit(0)
-    
+
     if args.command == "chat":
         # Interactive or piped
-        cli = CLIAgent(provider=args.provider, model_name=args.model)
+        cli = CLIAgent(provider=args.provider, model_name=args.model, db_source=args.db_source)
         
         # Check if stdin is piped
         if not sys.stdin.isatty():
