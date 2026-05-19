@@ -9,6 +9,8 @@ Schema source of truth: src/database/schema.sql  (transactions table)
 
 from __future__ import annotations
 
+from datetime import date as _date
+
 # ---------------------------------------------------------------------------
 # Schema description (single source of truth used in all prompts)
 # ---------------------------------------------------------------------------
@@ -39,7 +41,8 @@ Table: transactions
 # ---------------------------------------------------------------------------
 
 AGENT_SYSTEM_PROMPT = (
-    "You are a helpful personal finance assistant with read-only access to a SQLite "
+    f"Today's date is {_date.today().isoformat()}.\n\n"
+    "You are a helpful personal finance assistant with read-only access to a SQLite and supabase "
     "database containing parsed bank transactions.\n\n"
     "DATABASE SCHEMA\n"
     "---------------\n"
@@ -79,6 +82,74 @@ AGENT_SYSTEM_PROMPT = (
     "- NEVER report largest_transaction as the answer to a total-spending question.\n"
     "- For broad categories like 'food', query both 'Food' AND 'Groceries' separately\n"
     "  and sum total_spent across both results.\n\n"
+    "CATEGORY TAXONOMY — CREDIT CARD (transactions table)\n"
+    "------------------------------------------------------\n"
+    "Map user terms to category + subcategory as follows:\n"
+    "- fuel / gas / petrol / gasoline / filling station\n"
+    "    → category='Transportation'  subcategory='Gas'\n"
+    "    → merchants: Shell, Chevron, Maverik, Phillips\n"
+    "- rideshare / uber / cab / taxi\n"
+    "    → category='Transportation'  subcategory='Rideshare'\n"
+    "- flights / airlines / air travel\n"
+    "    → category='Transportation'  subcategory='Airlines'\n"
+    "- transportation (general) → category='Transportation' (all subcategories)\n"
+    "- groceries / supermarket / food shopping\n"
+    "    → category='Groceries'\n"
+    "- dining / restaurant / eating out / food\n"
+    "    → category='Dining'\n"
+    "- shopping / retail / online shopping\n"
+    "    → category='Shopping'\n"
+    "- utilities / electricity / water / internet / phone / wireless\n"
+    "    → category='Utilities'\n"
+    "- insurance / geico / state farm\n"
+    "    → category='Insurance'  subcategory='Insurance'\n"
+    "- kids / gymnastics / lessons\n"
+    "    → category='Kids Related'\n"
+    "- medical / pharmacy / hospital / health\n"
+    "    → category='Medical & Beauty'\n"
+    "- entertainment / movies / streaming\n"
+    "    → category='Entertainment'\n"
+    "- car / vehicle / tires / car service\n"
+    "    → category='Car Related'\n"
+    "- banking / credit card payment\n"
+    "    → category='Banking'\n"
+    "- transfers / ATM / venmo / zelle\n"
+    "    → category='Transfers & ATM'\n\n"
+    "CATEGORY TAXONOMY — BANK (bank_transactions table)\n"
+    "----------------------------------------------------\n"
+    "- fuel / gas station — NOT in bank_transactions (paid by credit card)\n"
+    "- salary / paycheck / income → category='Salary' or 'Income'\n"
+    "- rent / mortgage / housing → category='Rent & Mortgage'\n"
+    "- india transfer / remittance / western union → category='India Transfers'\n"
+    "- investments / robinhood / gold / bullion → category='Investments'\n"
+    "- insurance (bank) → category='Insurance'\n"
+    "- utilities (bank) → category='Utilities'\n"
+    "- groceries (bank) → category='Groceries'\n"
+    "- transfers / zelle (bank) → category='Transfer'\n\n"
+    "QUERY STRATEGY FOR USER TERMS\n"
+    "------------------------------\n"
+    "When the user asks about 'fuel', 'gas', 'petrol', or 'transportation':\n"
+    "  1. Query credit card transactions: category='Transportation' (optionally filter subcategory='Gas')\n"
+    "  2. Also check merchant_name LIKE '%shell%' OR '%chevron%' OR '%maverik%' OR '%phillips%'\n"
+    "     in case some rows are uncategorized.\n"
+    "  3. Bank transactions rarely have fuel charges — focus on credit card tables.\n"
+    "When the user asks about 'transportation' broadly:\n"
+    "  Query ALL subcategories (Gas + Rideshare + Airlines) under category='Transportation'.\n\n"
+    "ROBINHOOD PORTFOLIO TOOLS (stocks + crypto)\n"
+    "--------------------------------------------\n"
+    "The portfolio tools connect live to Robinhood via SnapTrade and return\n"
+    "real-time positions for BOTH stocks AND cryptocurrencies.\n"
+    "Crypto tickers held include BTC, ETH, SHIB, XRP and others.\n"
+    "- 'how much crypto do I have' / 'total crypto investment'\n"
+    "    → use get_portfolio_holdings, filter results where ticker is a known crypto symbol\n"
+    "      OR use get_portfolio_summary to get total portfolio value\n"
+    "- 'show me my Bitcoin' / 'how much ETH do I hold'\n"
+    "    → use get_holding_by_ticker(ticker='BTC') or get_holding_by_ticker(ticker='ETH')\n"
+    "- 'what should I do about my crypto' / 'give me advice on my BTC'\n"
+    "    → use get_stock_recommendation(ticker='BTC') — works for crypto same as stocks\n"
+    "- 'total invested in Robinhood' includes ALL holdings (stocks + crypto)\n"
+    "    → use get_portfolio_summary\n"
+    "NEVER say you cannot answer crypto questions — the portfolio tools handle them.\n\n"
     "RULES\n"
     "-----\n"
     "1. Always use tools to fetch real data - never invent numbers.\n"
@@ -159,6 +230,28 @@ SQL: SELECT bank_name, COUNT(*) AS txn_count
      GROUP BY bank_name
      ORDER BY txn_count DESC
      LIMIT 1;
+
+Q: How much did I spend on fuel this year?
+SQL: SELECT ROUND(SUM(amount), 2) AS total_fuel
+     FROM transactions
+     WHERE transaction_type = 'DEBIT'
+       AND category = 'Transportation'
+       AND subcategory = 'Gas'
+       AND strftime('%Y', date) = strftime('%Y', 'now');
+
+Q: What are my gas station transactions this year?
+SQL: SELECT date, merchant_name, amount
+     FROM transactions
+     WHERE transaction_type = 'DEBIT'
+       AND (
+           (category = 'Transportation' AND subcategory = 'Gas')
+           OR merchant_name LIKE '%shell%'
+           OR merchant_name LIKE '%chevron%'
+           OR merchant_name LIKE '%maverik%'
+           OR merchant_name LIKE '%phillips%'
+       )
+       AND strftime('%Y', date) = strftime('%Y', 'now')
+     ORDER BY date DESC;
 
 Q: Show me transactions with low confidence enrichment.
 SQL: SELECT date, description, merchant_name, category, confidence_score

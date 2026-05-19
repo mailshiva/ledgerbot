@@ -63,12 +63,17 @@ DEFAULT_DB = Path.home() / "sqlLite_DB" / "bank_data.db"
 # category → list of keyword patterns (matched against uppercased description)
 BANK_CATEGORY_RULES: dict[str, list[str]] = {
     "Income": [
-        "PAYROLL", "DIRECT DEP", "DIRECT DEPOSIT", "SALARY",
+        "PAYROLL", "DIRECT DEP", "DIRECT DEPOSIT",
         "DIVIDEND", "INTEREST PAYMENT", "TAX REFUND",
     ],
+    "Salary": ["TATA CONSULTANCYDIRECT","TATA CONSULTANCY DES:DIRECT", "SALARY"],
+    "School Fee Reimbursement": ["TATA CONSULTANCYCORP PMT"],
+    "ARHIPP": ["BKOFAMERICA MOBILE", "ARKANSAS HIPP"],
+    "Investments": ["ROBINHOOD DES", "JM BULLION",],
+    "India Transfers": ["WESTERN UNION DES", "CONTINENTAL EXC", "CROBO"],
     "Transfer": [
         "TRANSFER FROM", "TRANSFER TO", "XFER", "TFR",
-        "ONLINE TRANSFER", "INTERNAL TRANSFER",
+        "ONLINE TRANSFER", "INTERNAL TRANSFER", "ZELLE",
     ],
     "Utilities": [
         "EVERSOURCE", "ELECTRIC", "GAS BILL", "WATER BILL",
@@ -76,11 +81,11 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
         "CITY OF", "BENTONVILLE",
     ],
     "Rent & Mortgage": [
-        "RENT", "MORTGAGE", "HOUSING", "LEASE",
+        "RENT", "MORTGAGE", "HOUSING", "LEASE", "WALTONCROSSINGS",
     ],
     "Insurance": [
         "INSURANCE", "GEICO", "STATEFARM", "STATE FARM",
-        "ALLSTATE", "PROGRESSIVE", "LIBERTY MUTUAL",
+        "ALLSTATE", "PROGRESSIVE", "LIBERTY MUTUAL", "TEFRA",
     ],
     "Telecom": [
         "ATT", "AT&T", "VERIZON", "T-MOBILE", "TMOBILE",
@@ -91,17 +96,18 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
         "LOAN PAYMENT", "LOAN PMT", "AUTO LOAN",
         "STUDENT LOAN", "CAR PAYMENT",
     ],
+    "Credit Card Payment": ["CITI CARD", "ROBINHOOD CARD"],
     "ATM": [
         "ATM WITHDRAWAL", "ATM DEPOSIT", "ATM",
     ],
     "Fee": [
         "SERVICE FEE", "MONTHLY FEE", "OVERDRAFT", "NSF FEE",
-        "MAINTENANCE FEE", "ATM FEE",
+        "MAINTENANCE FEE", "ATM FEE", "BRIGHTWHEEL",
     ],
     "Groceries": [
         "STOP & SHOP", "STOP&SHOP", "WHOLE FOODS", "WALMART",
         "MARKET BASKET", "TRADER JOE", "ALDI", "COSTCO",
-        "SAMS CLUB", "GROCERY",
+        "SAMS CLUB", "GROCERY", "TARGET DEBIT",
     ],
     "Shopping": [
         "AMAZON", "AMZN", "TARGET", "EBAY", "PAYPAL",
@@ -275,8 +281,10 @@ class BankEnrichmentPipeline:
         # that can diverge after truncate/re-ingest cycles.  This map ensures
         # the correct Supabase FK is used when writing bank_transactions.
         self._stmt_id_map: dict[int, int] = {}   # {sqlite_id: supa_id}
+        self._raw_id_map: dict[int, int] = {}     # {sqlite_raw_id: supa_raw_id}
         if self._supa:
             self._stmt_id_map = self._build_stmt_id_map()
+            self._raw_id_map = self._build_raw_id_map()
 
     # ------------------------------------------------------------------
     # Public
@@ -355,6 +363,92 @@ class BankEnrichmentPipeline:
                 )
 
         log.info("statement_id map built: %d/%d matched", len(mapping), len(sqlite_rows))
+        return mapping
+
+    def _build_raw_id_map(self) -> dict[int, int]:
+        """
+        Map SQLite bank_transactions_raw.id → Supabase bank_transactions_raw.id.
+
+        Matches rows by (supa_statement_id, date, description, amount).
+        Handles genuine duplicates (same natural key appearing N times in both
+        stores) by collecting all IDs per key and assigning them 1:1 in
+        ascending ID order, so every Supabase raw row gets a distinct mapping.
+        """
+        # Fetch all Supabase raw rows (paginated — default limit is 1000)
+        supa_raw: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            page = (
+                self._supa.table("bank_transactions_raw")
+                .select("id,statement_id,date,description,amount")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            if not page.data:
+                break
+            supa_raw.extend(page.data)
+            if len(page.data) < page_size:
+                break
+            offset += page_size
+
+        # Build lookup: natural_key → sorted list of supa_raw_ids.
+        # Using a list handles genuine duplicates (same transaction ingested
+        # twice) where the same natural key appears more than once.
+        supa_by_key: dict[tuple, list[int]] = {}
+        for r in supa_raw:
+            key = (
+                r["statement_id"],
+                r["date"],
+                r["description"],
+                round(float(r["amount"]), 4),
+            )
+            supa_by_key.setdefault(key, []).append(r["id"])
+        for ids in supa_by_key.values():
+            ids.sort()  # deterministic assignment
+
+        # Group SQLite raw rows by their translated natural key.
+        sqlite_rows = self._conn.execute(
+            "SELECT id, statement_id, date, description, amount FROM bank_transactions_raw"
+        ).fetchall()
+
+        sqlite_by_key: dict[tuple, list[int]] = {}
+        unmapped_stmt = 0
+        for row in sqlite_rows:
+            supa_stmt_id = self._stmt_id_map.get(row["statement_id"])
+            if supa_stmt_id is None:
+                unmapped_stmt += 1
+                continue
+            key = (
+                supa_stmt_id,
+                row["date"],
+                row["description"],
+                round(float(row["amount"]), 4),
+            )
+            sqlite_by_key.setdefault(key, []).append(row["id"])
+        for ids in sqlite_by_key.values():
+            ids.sort()  # match assignment order on both sides
+
+        # 1:1 ordered assignment: sqlite_ids[i] → supa_ids[i]
+        mapping: dict[int, int] = {}
+        unmatched = 0
+        for key, sqlite_ids in sqlite_by_key.items():
+            supa_ids = supa_by_key.get(key, [])
+            for i, sqlite_id in enumerate(sqlite_ids):
+                if i < len(supa_ids):
+                    mapping[sqlite_id] = supa_ids[i]
+                else:
+                    unmatched += 1
+                    log.debug(
+                        "No Supabase match for SQLite raw_id=%d — duplicate count mismatch",
+                        sqlite_id,
+                    )
+
+        if unmapped_stmt:
+            log.warning("raw_id map: %d SQLite rows skipped (no stmt mapping)", unmapped_stmt)
+        if unmatched:
+            log.warning("raw_id map: %d SQLite rows could not be matched to Supabase", unmatched)
+        log.info("raw_id map built: %d/%d matched", len(mapping), len(sqlite_rows))
         return mapping
 
     # ------------------------------------------------------------------
@@ -454,15 +548,31 @@ class BankEnrichmentPipeline:
 
         if self._supa:
             try:
-                # Remap SQLite statement_id → Supabase statement_id before writing.
+                # Remap SQLite IDs → Supabase IDs before writing.
+                # Both statement_id and raw_id use independent sequences in
+                # SQLite vs Supabase and must be translated before the FK check.
                 supa_rows = []
+                skipped_no_raw_id = 0
                 for r in rows:
                     supa_r = dict(r)
-                    sqlite_stmt_id = r["statement_id"]
                     supa_r["statement_id"] = self._stmt_id_map.get(
-                        sqlite_stmt_id, sqlite_stmt_id
+                        r["statement_id"], r["statement_id"]
                     )
+                    supa_raw_id = self._raw_id_map.get(r["raw_id"])
+                    if supa_raw_id is None:
+                        skipped_no_raw_id += 1
+                        log.debug(
+                            "Skipping Supabase write: no raw_id mapping for sqlite_raw_id=%d",
+                            r["raw_id"],
+                        )
+                        continue
+                    supa_r["raw_id"] = supa_raw_id
                     supa_rows.append(_coerce(supa_r))
+                if skipped_no_raw_id:
+                    log.warning(
+                        "%d enriched rows skipped for Supabase (no raw_id mapping)",
+                        skipped_no_raw_id,
+                    )
 
                 chunk_size = 500
                 for i in range(0, len(supa_rows), chunk_size):
@@ -470,7 +580,7 @@ class BankEnrichmentPipeline:
                     self._supa.table("bank_transactions").upsert(
                         chunk, on_conflict="raw_id"
                     ).execute()
-                log.debug("Supabase bank_transactions: %d rows", len(rows))
+                log.debug("Supabase bank_transactions: %d rows", len(supa_rows))
             except Exception as e:
                 log.warning("Supabase enrichment upsert failed: %s", e)
 

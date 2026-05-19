@@ -30,6 +30,7 @@ Session ends with:
 
 import sys
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
 import time
@@ -42,7 +43,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.llm.config import LLMConfig, Model
 from src.llm.client import LLMClient
 #from src.agent.agent import Agent
-from src.agent.graph import GraphAgent as Agent
+#from src.agent.graph import GraphAgent as Agent
+from src.agent.graph_lg import GraphAgent as Agent
 from src.database.dual_write_manager import DualWriteManager
 
 
@@ -80,7 +82,7 @@ class CLIAgent:
             self.llm_client = LLMClient(config)
             #self.db = DatabaseManager(str(Path.home() / "sqlLite_DB" / "bank_data.db"))
             self.db = DualWriteManager(str(Path.home() / "sqlLite_DB" / "bank_data.db"), read_source=self.db_source)
-            self.agent = Agent(db=self.db, llm_client=self.llm_client, max_iterations=5)
+            self.agent = Agent(db=self.db, llm_client=self.llm_client, max_iterations=25)
             
             self.model_name = model.value
             print(f"✓ Agent initialized")
@@ -133,7 +135,7 @@ class CLIAgent:
             # Get turn info
             turn = self.agent.conversation_history[-1]
             self.turns.append(turn)
-            
+
             # Print answer
             print(answer)
             
@@ -171,12 +173,13 @@ class CLIAgent:
     def run_interactive(self) -> None:
         """Start interactive REPL loop."""
         print("\n" + "=" * 80)
-        print("CREDIT CARD TRANSACTIONS — INTERACTIVE AGENT")
+        print("CREDIT CARD TRANSACTIONS AND BANKING — INTERACTIVE AGENT")
         print("=" * 80)
         print(f"\n📝 Ask questions about your spending:")
         print("   'How much did I spend on food in Feb?'")
         print("   'What are my top merchants?'")
         print("   'Show me Walmart transactions'")
+        print("   'How much was my salary in Feb 2025 ?'")
         print("\n💡 Commands:")
         print("   'exit', 'quit', 'q' — end session")
         print("   Ctrl+C — interrupt current question")
@@ -251,8 +254,22 @@ Examples:
         dest="db_source",
         help="Preferred read source: 'supa' (Supabase first, SQLite fallback) or 'sqlite' (SQLite first, Supabase fallback). Default: supa"
     )
-    
+
+    parser.add_argument(
+        "--log-level",
+        default="WARNING",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        dest="log_level",
+        help="Logging verbosity. DEBUG shows every LLM call and tool execution. Default: WARNING"
+    )
+
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+    )
     
     if args.command == "help":
         parser.print_help()

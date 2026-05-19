@@ -319,14 +319,14 @@ class EnrichmentPipeline:
             amount=amount,
             transaction_type=transaction_type,
             balance=row["balance"],
-            clean_description=_get(result, "clean_description", "raw_description"),
-            merchant_name=_get(result, "merchant_name", "merchant"),
+            clean_description=_get(result, "raw_description"),
+            merchant_name=_get(result, "merchant"),
             merchant_raw=description,
             category=_get(result, "category") or "Uncategorized",
             subcategory=_get(result, "subcategory"),
             location=_get(result, "location"),
-            confidence_score=float(_get(result, "confidence_score", "confidence") or 0.0),
-            enrichment_method=_get(result, "enrichment_method"),
+            confidence_score=float(_get(result, "confidence") or 0.0),
+            enrichment_method="nlp",
         )
 
 

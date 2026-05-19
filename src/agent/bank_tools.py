@@ -122,7 +122,7 @@ def summarize_bank_spending(
     if month:
         where += f" AND strftime('%Y-%m', date) = '{month}'"
     if category:
-        where += f" AND category = '{category}'"
+        where += f" AND LOWER(category) LIKE LOWER('%{category}%')"
     if account_type:
         where += f" AND account_type = '{account_type}'"
 
@@ -195,13 +195,14 @@ def find_bank_transactions(
 ) -> list[dict]:
     """
     Search bank transactions with flexible filters.
+    category uses case-insensitive partial match (LIKE).
     """
     table = _txn_table(db.conn)
     where = "WHERE 1=1"
     if account_type:
         where += f" AND account_type = '{account_type}'"
     if category:
-        where += f" AND category = '{category}'"
+        where += f" AND LOWER(category) LIKE LOWER('%{category}%')"
     if start_date:
         where += f" AND date >= '{start_date}'"
     if end_date:
@@ -213,7 +214,7 @@ def find_bank_transactions(
     if transaction_type:
         where += f" AND transaction_type = '{transaction_type}'"
     if description:
-        where += f" AND description LIKE '%{description}%'"
+        where += f" AND LOWER(description) LIKE LOWER('%{description}%')"
     if bank_name:
         where += f" AND bank_name = '{bank_name}'"
 
@@ -225,6 +226,123 @@ def find_bank_transactions(
         LIMIT {limit}
     """
     return _run(db.conn, sql)
+
+
+# ---------------------------------------------------------------------------
+# get_bank_transactions_by_category
+# ---------------------------------------------------------------------------
+
+def get_bank_transactions_by_category(
+    db,
+    category: str,
+    year: str = None,
+    month: str = None,
+    account_type: str = None,
+    transaction_type: str = None,
+    limit: int = 100,
+) -> list[dict]:
+    """
+    Fetch individual bank transactions for a specific category with optional
+    year, month, and account_type filters.
+
+    category: partial, case-insensitive match — e.g. 'India' matches
+              'India Transfers'; 'transfer' matches any transfer category.
+    year:     4-digit year string, e.g. '2026'
+    month:    YYYY-MM string, e.g. '2026-03' (takes precedence over year)
+    """
+    table = _txn_table(db.conn)
+    where = f"WHERE LOWER(category) LIKE LOWER('%{category}%')"
+
+    if month:
+        where += f" AND strftime('%Y-%m', date) = '{month[:7]}'"
+    elif year:
+        where += f" AND strftime('%Y', date) = '{year[:4]}'"
+
+    if account_type:
+        where += f" AND account_type = '{account_type}'"
+    if transaction_type:
+        where += f" AND transaction_type = '{transaction_type.upper()}'"
+
+    limit = min(limit, 200)
+    sql = f"""
+        SELECT date, description, clean_description, amount,
+               transaction_type, category, account_type, bank_name, balance
+        FROM {table}
+        {where}
+        ORDER BY date DESC
+        LIMIT {limit}
+    """
+    return _run(db.conn, sql)
+
+
+# ---------------------------------------------------------------------------
+# get_investment_summary
+# ---------------------------------------------------------------------------
+
+def get_investment_summary(
+    db,
+    year: str = None,
+    month: str = None,
+    limit: int = 200,
+) -> dict:
+    """
+    Summarize investment activity from bank transactions categorized as
+    'Investments' (e.g. Robinhood transfers, JM Bullion purchases).
+
+    Returns an overall summary (total invested, total returned, net) plus
+    the individual transactions ordered by date descending.
+
+    year:  '2026' — filter to a single calendar year
+    month: '2026-03' — filter to a single month (takes precedence over year)
+    limit: max individual rows returned (default 200)
+    """
+    table = _txn_table(db.conn)
+    where = "WHERE LOWER(category) LIKE LOWER('%investment%')"
+
+    if month:
+        where += f" AND strftime('%Y-%m', date) = '{month[:7]}'"
+    elif year:
+        where += f" AND strftime('%Y', date) = '{year[:4]}'"
+
+    # Aggregate summary
+    summary_sql = f"""
+        SELECT
+            COUNT(*) AS transaction_count,
+            ROUND(SUM(CASE WHEN transaction_type='DEBIT'  THEN amount ELSE 0 END), 2) AS total_invested,
+            ROUND(SUM(CASE WHEN transaction_type='CREDIT' THEN amount ELSE 0 END), 2) AS total_returned,
+            ROUND(
+                SUM(CASE WHEN transaction_type='DEBIT'  THEN amount ELSE 0 END) -
+                SUM(CASE WHEN transaction_type='CREDIT' THEN amount ELSE 0 END),
+            2) AS net_outflow,
+            MIN(date) AS first_date,
+            MAX(date) AS last_date
+        FROM {table}
+        {where}
+    """
+    summary_rows = _run(db.conn, summary_sql)
+    summary = summary_rows[0] if summary_rows else {}
+
+    # Individual transactions
+    limit = min(limit, 200)
+    txn_sql = f"""
+        SELECT date, description, clean_description, amount,
+               transaction_type, category, account_type, bank_name
+        FROM {table}
+        {where}
+        ORDER BY date DESC
+        LIMIT {limit}
+    """
+    transactions = _run(db.conn, txn_sql)
+
+    if year:
+        summary["year_filter"] = year
+    if month:
+        summary["month_filter"] = month
+
+    return {
+        "summary": summary,
+        "transactions": transactions,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +478,8 @@ _TOOL_DISPATCH = {
     "summarize_bank_spending": lambda db, **kw: summarize_bank_spending(db, **kw),
     "get_bank_spending_by_month": lambda db, **kw: get_bank_spending_by_month(db, **kw),
     "find_bank_transactions": lambda db, **kw: find_bank_transactions(db, **kw),
+    "get_bank_transactions_by_category": lambda db, **kw: get_bank_transactions_by_category(db, **kw),
+    "get_investment_summary": lambda db, **kw: get_investment_summary(db, **kw),
     "get_bank_balance": lambda db, **kw: get_bank_balance(db, **kw),
     "get_uncategorized_bank": lambda db, **kw: get_uncategorized_bank(db, **kw),
     "get_bank_statements": lambda db, **kw: get_bank_statements(db, **kw),
@@ -486,6 +606,69 @@ BANK_TOOL_DEFINITIONS = [
                     "description": {"type": "string", "description": "Keyword search in description."},
                     "bank_name": {"type": "string", "description": "Filter by bank name, e.g. 'dcu'."},
                     "limit": {"type": "integer", "description": "Max results (default 50, max 100)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_bank_transactions_by_category",
+            "description": "Fetch individual bank transactions for a specific category such as 'India Transfers', 'Utilities', 'Rent & Mortgage'. Use this when the user asks about transactions in a particular category, optionally filtered by year or month. Category uses partial, case-insensitive matching so 'India' will match 'India Transfers'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Category name or partial match (case-insensitive), e.g. 'India Transfers', 'transfer', 'utilities'.",
+                    },
+                    "year": {
+                        "type": "string",
+                        "description": "4-digit year filter, e.g. '2026'. Omit for all years.",
+                    },
+                    "month": {
+                        "type": "string",
+                        "description": "YYYY-MM month filter, e.g. '2026-03'. Takes precedence over year.",
+                    },
+                    "account_type": {
+                        "type": "string",
+                        "enum": ["checking", "savings"],
+                        "description": "Filter by account type. Omit for both.",
+                    },
+                    "transaction_type": {
+                        "type": "string",
+                        "enum": ["DEBIT", "CREDIT"],
+                        "description": "Filter by DEBIT or CREDIT.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results (default 100, max 200).",
+                    },
+                },
+                "required": ["category"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_investment_summary",
+            "description": "Summarize investment activity from bank transactions in the 'Investments' category (e.g. Robinhood transfers, JM Bullion purchases). Returns an aggregate summary (total invested as DEBIT, total returned as CREDIT, net outflow) plus individual transactions. Use this when the user asks about investments, how much they invested, Robinhood activity, or gold/bullion purchases.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "year": {
+                        "type": "string",
+                        "description": "4-digit year filter, e.g. '2026'. Omit for all years.",
+                    },
+                    "month": {
+                        "type": "string",
+                        "description": "YYYY-MM month filter, e.g. '2026-03'. Takes precedence over year.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max individual transactions returned (default 200, max 200).",
+                    },
                 },
             },
         },

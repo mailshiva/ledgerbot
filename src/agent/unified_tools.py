@@ -24,13 +24,17 @@ from src.agent.bank_tools import (
     BANK_TOOL_DEFINITIONS,
     execute_bank_tool as _execute_bank_tool,
 )
+from src.agent.portfolio_tools import (
+    PORTFOLIO_TOOL_DEFINITIONS,
+    execute_portfolio_tool as _execute_portfolio_tool,
+)
 
 
 # ---------------------------------------------------------------------------
 # Merged tool definitions
 # ---------------------------------------------------------------------------
 
-ALL_TOOL_DEFINITIONS = CREDIT_TOOL_DEFINITIONS + BANK_TOOL_DEFINITIONS
+ALL_TOOL_DEFINITIONS = CREDIT_TOOL_DEFINITIONS + BANK_TOOL_DEFINITIONS + PORTFOLIO_TOOL_DEFINITIONS
 
 # Build name→source lookup for routing
 _CREDIT_TOOL_NAMES = {
@@ -38,6 +42,9 @@ _CREDIT_TOOL_NAMES = {
 }
 _BANK_TOOL_NAMES = {
     t["function"]["name"] for t in BANK_TOOL_DEFINITIONS
+}
+_PORTFOLIO_TOOL_NAMES = {
+    t["function"]["name"] for t in PORTFOLIO_TOOL_DEFINITIONS
 }
 
 
@@ -47,10 +54,11 @@ _BANK_TOOL_NAMES = {
 
 def execute_any_tool(name: str, db, **kwargs) -> Any:
     """
-    Execute a tool by name, routing to either credit card or bank handler.
+    Execute a tool by name, routing to the credit card, bank, or portfolio handler.
 
     Args:
-        name: Tool function name (e.g. 'get_categories', 'get_bank_balance')
+        name: Tool function name (e.g. 'get_categories', 'get_bank_balance',
+              'get_portfolio_summary')
         db: Database manager (DatabaseManager or DualWriteManager)
         **kwargs: Tool-specific arguments
 
@@ -58,13 +66,15 @@ def execute_any_tool(name: str, db, **kwargs) -> Any:
         Tool result (list[dict], dict, or error dict)
 
     Raises:
-        KeyError: If tool name is not registered in either set
+        KeyError: If tool name is not registered in any set
     """
     if name in _CREDIT_TOOL_NAMES:
         return _execute_credit_tool(name, db, **kwargs)
     if name in _BANK_TOOL_NAMES:
         return _execute_bank_tool(name, db, **kwargs)
+    if name in _PORTFOLIO_TOOL_NAMES:
+        return _execute_portfolio_tool(name, db, **kwargs)
     raise KeyError(
         f"Unknown tool: {name}. "
-        f"Available: {sorted(_CREDIT_TOOL_NAMES | _BANK_TOOL_NAMES)}"
+        f"Available: {sorted(_CREDIT_TOOL_NAMES | _BANK_TOOL_NAMES | _PORTFOLIO_TOOL_NAMES)}"
     )

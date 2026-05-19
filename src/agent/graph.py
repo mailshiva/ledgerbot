@@ -17,11 +17,11 @@ Graph structure:
     └────┬─────┘
          │
     ┌────▼─────┐
-    │  call_llm │◄──────────────────────┐
+    │ call_llm │ ◄──────────────────────┐
     └────┬─────┘                        │
          │                              │
     ┌────▼──────────┐    ┌──────────┐   │
-    │ should_continue├───►│call_tools├───┘
+    │should_continue├───►│call_tools├───┘
     └────┬──────────┘    └──────────┘
          │ (no tools)
     ┌────▼─────┐
@@ -279,7 +279,7 @@ class GraphAgent:
         self,
         llm_client: LLMClient,
         db,
-        max_iterations: int = 5,
+        max_iterations: int = 25,
         system_prompt: str | None = None,
     ):
         self.llm_client = llm_client

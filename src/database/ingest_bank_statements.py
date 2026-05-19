@@ -37,8 +37,28 @@ log = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from src.parsers.base_bank_parser import BaseBankParser
 from src.parsers.dcu_parser import DCUParser
+from src.parsers.boa_parser import BOAParser
 from src.database.migrate_bank_tables import SQLITE_DDL
+
+
+# ---------------------------------------------------------------------------
+# Parser selection
+# ---------------------------------------------------------------------------
+
+def _select_parser(pdf_path: Path) -> BaseBankParser:
+    """
+    Return the appropriate parser for a given PDF based on filename convention.
+
+    Filename patterns:
+      eStmt_*.pdf  → Bank of America
+      stmt_*.pdf   → DCU (default)
+    """
+    name = pdf_path.name.lower()
+    if name.startswith("estmt_"):
+        return BOAParser()
+    return DCUParser()
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +355,6 @@ def ingest_directory(
         print(f"❌ No PDF files found in: {source_dir}")
         sys.exit(1)
 
-    parser = DCUParser()
     stats = {
         "total_files": len(pdfs),
         "imported": 0,
@@ -380,6 +399,7 @@ def ingest_directory(
         prefix = f"[{i}/{len(pdfs)}]"
 
         try:
+            parser = _select_parser(pdf_path)
             result = parser.parse(pdf_path)
             period = (
                 f"{result.metadata.get('statement_period_start', '?')} → "

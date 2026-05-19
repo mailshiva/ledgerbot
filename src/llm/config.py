@@ -79,7 +79,7 @@ class Provider(str, Enum):
 class Model(str, Enum):
     # Gemini
     GEMINI_FLASH = "gemini-2.5-flash"
-    GEMINI_PRO = "gemini-1.5-pro"
+    GEMINI_PRO = "gemini-2.5-pro"
 
     # Anthropic
     CLAUDE_HAIKU = "claude-haiku-4-5-20251001"
