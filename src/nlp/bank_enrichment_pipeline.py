@@ -66,7 +66,7 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
         "PAYROLL", "DIRECT DEP", "DIRECT DEPOSIT",
         "DIVIDEND", "INTEREST PAYMENT", "TAX REFUND",
     ],
-    "Salary": ["TATA CONSULTANCYDIRECT","TATA CONSULTANCY DES:DIRECT", "SALARY"],
+    "Salary": ["TATA CONSULTANCYDIRECT","TATA CONSULTANCY DES:DIRECT", "TATA CONS SERVS", "SALARY"],
     "School Fee Reimbursement": ["TATA CONSULTANCYCORP PMT"],
     "ARHIPP": ["BKOFAMERICA MOBILE", "ARKANSAS HIPP"],
     "Investments": ["ROBINHOOD DES", "JM BULLION",],
@@ -74,6 +74,10 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
     "Transfer": [
         "TRANSFER FROM", "TRANSFER TO", "XFER", "TFR",
         "ONLINE TRANSFER", "INTERNAL TRANSFER", "ZELLE",
+        "REALTIME TRANSFER",        # Chase internal transfers
+        "DIGITAL FEDERAL A2A",      # DCU → Chase A2A transfers
+        "BANK OF AMERICA P2P",      # BOA → Chase P2P transfers
+        "A2A XFER",
     ],
     "Utilities": [
         "EVERSOURCE", "ELECTRIC", "GAS BILL", "WATER BILL",

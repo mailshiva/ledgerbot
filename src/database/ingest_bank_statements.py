@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.parsers.base_bank_parser import BaseBankParser
 from src.parsers.dcu_parser import DCUParser
 from src.parsers.boa_parser import BOAParser
+from src.parsers.chase_parser import ChaseParser
 from src.database.migrate_bank_tables import SQLITE_DDL
 
 
@@ -49,16 +50,33 @@ from src.database.migrate_bank_tables import SQLITE_DDL
 
 def _select_parser(pdf_path: Path) -> BaseBankParser:
     """
-    Return the appropriate parser for a given PDF based on filename convention.
+    Return the appropriate parser for a given PDF.
 
-    Filename patterns:
+    Fast path — filename prefix:
       eStmt_*.pdf  → Bank of America
-      stmt_*.pdf   → DCU (default)
+      stmt_*.pdf   → DCU
+
+    Content peek (first page) for unrecognized filenames:
+      Contains "JPMorgan Chase" or "*start*transaction detail" → Chase
+      Fallback → DCU
     """
     name = pdf_path.name.lower()
     if name.startswith("estmt_"):
         return BOAParser()
-    return DCUParser()
+    if name.startswith("stmt_"):
+        return DCUParser()
+
+    # Unrecognized filename: peek at first page to identify bank
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf_path) as pdf:
+            first_text = pdf.pages[0].extract_text() or "" if pdf.pages else ""
+        if "JPMorgan Chase" in first_text or "*start*transaction detail" in first_text.lower():
+            return ChaseParser()
+    except Exception:
+        pass
+
+    return DCUParser()  # fallback
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +146,13 @@ def _coerce(row: dict) -> dict:
 def ensure_tables(conn: sqlite3.Connection) -> None:
     """Create bank tables if they don't exist (idempotent)."""
     conn.executescript(SQLITE_DDL)
+    # Migration: add raw_text if the live loan_transactions table predates it
+    existing = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(loan_transactions)").fetchall()
+    }
+    if "raw_text" not in existing:
+        conn.execute("ALTER TABLE loan_transactions ADD COLUMN raw_text TEXT")
     conn.commit()
 
 
