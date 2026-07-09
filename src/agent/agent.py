@@ -19,6 +19,10 @@ from typing import Optional
 from src.database.db_manager import DatabaseManager
 from src.llm.client import LLMClient
 #from src.llm.prompts import AGENT_SYSTEM_PROMPT
+from src.agent.tools import TOOL_DEFINITIONS, execute_tool
+from src.agent.bank_tools import BANK_TOOL_DEFINITIONS, execute_bank_tool
+
+ALL_TOOLS = TOOL_DEFINITIONS + BANK_TOOL_DEFINITIONS
 
 
 logger = logging.getLogger(__name__)
@@ -81,10 +85,17 @@ class Agent:
         try:
             turn_num = len(self.conversation_history) + 1
 
+            # Build prior conversation context (last 6 turns max to cap token usage)
+            prior_history = []
+            for turn in self.conversation_history[-6:]:
+                prior_history.append({"role": "user", "content": turn.question})
+                prior_history.append({"role": "assistant", "content": turn.final_answer})
+
             response = self.llm_client.run_agentic_loop(
                 question,
                 db=self.db,
                 max_iterations=self.max_turns,
+                prior_history=prior_history or None,
             )
 
             final_answer = response.text

@@ -8,7 +8,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
+CLAUDE.md
+CHANGES.md
 # Database (personal financial data)
 *.db
 transactions.db

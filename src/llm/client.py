@@ -174,13 +174,15 @@ def _complete_gemini(
 
     # Check parts for tool calls only; use raw.text for the aggregated text
     # (raw.text already combines all text parts — don't add part.text on top)
-    if hasattr(raw, 'parts'):
+    if hasattr(raw, 'parts') and raw.parts:
         for part in raw.parts:
             if hasattr(part, "function_call") and part.function_call and part.function_call.name:
                 fc = part.function_call
                 tool_calls.append({"name": fc.name, "args": dict(fc.args)})
 
-    text = (raw.text or "") if hasattr(raw, 'text') else ""
+    # Only access raw.text when there are no tool calls — accessing it on a
+    # function-call response triggers a Gemini SDK warning about non-text parts.
+    text = "" if tool_calls else ((raw.text or "") if hasattr(raw, 'text') else "")
 
     # Get token counts
     input_tokens = 0
@@ -632,6 +634,7 @@ class LLMClient:
         system: str | None = None,
         model: "Model | None" = None,
         max_iterations: int = 5,
+        prior_history: list[dict] | None = None,
     ) -> "LLMResponse":
         """
         Run a full tool-use loop until the LLM returns a plain-text answer
@@ -654,7 +657,8 @@ class LLMClient:
 
         Returns the final LLMResponse containing the agent's plain-text answer.
         """
-        from src.agent.tools import TOOL_DEFINITIONS, execute_tool
+        #from src.agent.tools import TOOL_DEFINITIONS, execute_tool
+        from src.agent.unified_tools import ALL_TOOL_DEFINITIONS as TOOL_DEFINITIONS, execute_any_tool as execute_tool
         from src.llm.prompts import AGENT_SYSTEM_PROMPT
 
         system_prompt = system or AGENT_SYSTEM_PROMPT
@@ -662,7 +666,8 @@ class LLMClient:
 
         # Build a running message history (OpenAI-style role/content dicts)
         # that we accumulate across iterations.
-        history: list[dict] = [{"role": "user", "content": question}]
+        history: list[dict] = list(prior_history) if prior_history else []
+        history.append({"role": "user", "content": question})
 
         for iteration in range(max_iterations):
             logger.debug("Agent iteration %d/%d", iteration + 1, max_iterations)

@@ -71,24 +71,28 @@ def _run(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Tool 1 — query_db
 # ---------------------------------------------------------------------------
-
-def query_db(db, sql: str) -> list[dict] | dict:
+#def query_db(db, sql: str) -> list[dict] | dict:
+def query_db(db, sql: str, params: list = None) -> list[dict] | dict:
     """
-    Execute a read-only SQL query against the database.
-
-    Parameters
-    ----------
-    db  : DatabaseManager
-    sql : Raw SQL SELECT statement
-
-    Returns a list of row dicts, or an error dict on failure.
+    Execute a read-only SQL query.
+    Routes to Supabase via DualWriteManager shim, or falls back to
+    direct SQLite if db is a plain DatabaseManager.
     """
+    # Block writes — safety net regardless of which db is in use
+    first = sql.strip().split()[0].upper()
+    if first in ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE"):
+        return {"error": f"Write operation '{first}' not permitted via query_db"}
+
+    # DualWriteManager path → Supabase
+    if hasattr(db.conn, "execute_sql"):
+        return db.conn.execute_sql(sql)
+
+    # Plain DatabaseManager path → SQLite (used in tests with in-memory DB)
     try:
-        return _run(db.conn, sql)
-    except PermissionError as exc:
-        return {"error": str(exc)}
-    except sqlite3.Error as exc:
-        return {"error": f"SQL error: {exc}", "sql": sql}
+        rows = db.conn.execute(sql, params or []).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +128,42 @@ def get_categories(db) -> list[dict] | dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 3 — get_merchants
+# Tool 3 — get_category_subcategories
+# ---------------------------------------------------------------------------
+
+def get_category_subcategories(db, category: str) -> list[dict] | dict:
+    """
+    Return all distinct subcategories within a given category, with
+    transaction counts and total amounts, ordered by total spend descending.
+
+    Parameters
+    ----------
+    db       : DatabaseManager
+    category : The category to drill into (case-insensitive).
+    """
+    try:
+        table = _txn_table(db.conn)
+        sql = f"""
+            SELECT
+                subcategory,
+                COUNT(*)                                    AS transaction_count,
+                ROUND(SUM(CASE WHEN transaction_type = 'DEBIT'
+                               THEN amount ELSE 0 END), 2) AS total_spent,
+                ROUND(SUM(CASE WHEN transaction_type = 'CREDIT'
+                               THEN amount ELSE 0 END), 2) AS total_received
+            FROM {table}
+            WHERE LOWER(category) = LOWER(?)
+              AND subcategory IS NOT NULL
+            GROUP BY subcategory
+            ORDER BY total_spent DESC
+        """
+        return _run(db.conn, sql, (category,))
+    except sqlite3.Error as exc:
+        return {"error": f"get_category_subcategories failed: {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Tool 4 — get_merchants
 # ---------------------------------------------------------------------------
 
 def get_merchants(db, limit: int = 20) -> list[dict] | dict:
@@ -166,7 +205,7 @@ def get_merchants(db, limit: int = 20) -> list[dict] | dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 4 — summarize_spending
+# Tool 5 — summarize_spending
 # ---------------------------------------------------------------------------
 
 def summarize_spending(db, month: str | None = None,
@@ -226,7 +265,7 @@ def summarize_spending(db, month: str | None = None,
 
 
 # ---------------------------------------------------------------------------
-# Tool 5 — get_spending_by_month
+# Tool 6 — get_spending_by_month
 # ---------------------------------------------------------------------------
 
 def get_spending_by_month(db, months: int = 6) -> list[dict] | dict:
@@ -262,7 +301,7 @@ def get_spending_by_month(db, months: int = 6) -> list[dict] | dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 6 — find_transactions
+# Tool 7 — find_transactions
 # ---------------------------------------------------------------------------
 
 def find_transactions(db,
@@ -351,7 +390,7 @@ def find_transactions(db,
 
 
 # ---------------------------------------------------------------------------
-# Tool 7 — detect_duplicates
+# Tool 8 — detect_duplicates
 # ---------------------------------------------------------------------------
 
 def detect_duplicates(db, days_window: int = 3) -> list[dict] | dict:
@@ -392,7 +431,7 @@ def detect_duplicates(db, days_window: int = 3) -> list[dict] | dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 8 — get_uncategorized
+# Tool 9 — get_uncategorized
 # ---------------------------------------------------------------------------
 
 def get_uncategorized(db, limit: int = 20) -> list[dict] | dict:
@@ -425,7 +464,7 @@ def get_uncategorized(db, limit: int = 20) -> list[dict] | dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 9 — get_statements
+# Tool 10 — get_statements
 # ---------------------------------------------------------------------------
 
 def get_statements(db) -> list[dict] | dict:
@@ -445,6 +484,56 @@ def get_statements(db) -> list[dict] | dict:
     except sqlite3.Error as exc:
         return {"error": f"get_statements failed: {exc}"}
 
+
+def get_subcategory_summary(
+    db,
+    subcategory: str = None,
+    month: str = None,
+    bank_name: str = None,
+) -> list[dict] | dict:
+    """
+    Summarise spending grouped by subcategory, with optional filters.
+
+    Parameters
+    ----------
+    subcategory : filter to a single subcategory (partial match, case-insensitive)
+    month       : filter to YYYY-MM  e.g. '2025-01'
+    bank_name   : filter to a specific bank  e.g. 'capital_one'
+    """
+    table = _txn_table(db.conn)
+    if table == "transactions_raw":
+        return []
+
+    conditions = ["transaction_type = 'DEBIT'", "subcategory IS NOT NULL"]
+    params: list = []
+
+    if subcategory:
+        conditions.append("LOWER(subcategory) LIKE LOWER(?)")
+        params.append(f"%{subcategory}%")
+    if month:
+        conditions.append("strftime('%Y-%m', date) = ?")
+        params.append(month)
+    if bank_name:
+        conditions.append("LOWER(bank_name) = LOWER(?)")
+        params.append(bank_name)
+
+    where = " AND ".join(conditions)
+
+    sql = f"""
+        SELECT
+            subcategory,
+            category,
+            COUNT(*)        AS transaction_count,
+            SUM(amount)     AS total_spent,
+            AVG(amount)     AS avg_transaction,
+            MIN(amount)     AS min_amount,
+            MAX(amount)     AS max_amount
+        FROM {table}
+        WHERE {where}
+        GROUP BY subcategory, category
+        ORDER BY total_spent DESC
+    """
+    return query_db(db, sql, params)
 
 # ---------------------------------------------------------------------------
 # Tool registry — OpenAI-compatible JSON schema
@@ -485,6 +574,27 @@ TOOL_DEFINITIONS: list[dict] = [
                 "type": "object",
                 "properties": {},
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_category_subcategories",
+            "description": (
+                "Return all distinct subcategories within a given category, with "
+                "transaction counts and total amounts. Use this to drill down into "
+                "a specific category (e.g. all subcategories under 'Entertainment')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "The category to drill into, e.g. 'Entertainment' or 'Food'."
+                    }
+                },
+                "required": ["category"]
             }
         }
     },
@@ -638,19 +748,56 @@ TOOL_DEFINITIONS: list[dict] = [
             }
         }
     },
+    {
+    "type": "function",
+    "function": {
+        "name": "get_subcategory_summary",
+        "description": (
+            "Summarise spending grouped by subcategory (e.g. 'Streaming', "
+            "'Coffee', 'Rideshare'). Supports filtering by a specific subcategory "
+            "name (partial match), a calendar month (YYYY-MM), and/or bank. "
+            "Returns subcategory, parent category, transaction count, total spent, "
+            "average, min and max transaction amounts."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subcategory": {
+                    "type": "string",
+                    "description": (
+                        "Filter to a specific subcategory (partial, case-insensitive). "
+                        "e.g. 'streaming', 'coffee', 'rideshare'. "
+                        "Omit to return all subcategories."
+                        ),
+                    },
+                "month": {
+                    "type": "string",
+                    "description": "Filter to a calendar month in YYYY-MM format. e.g. '2025-01'.",
+                    },
+                "bank_name": {
+                    "type": "string",
+                    "description": "Filter to a specific bank. e.g. 'capital_one', 'citi'.",
+                    },
+                },
+            "required": [],
+            },
+        },
+    },
 ]
 
 # Quick lookup: tool name → function
 _TOOL_FUNCTIONS = {
     "query_db":            query_db,
-    "get_categories":      get_categories,
-    "get_merchants":       get_merchants,
+    "get_categories":               get_categories,
+    "get_category_subcategories":   get_category_subcategories,
+    "get_merchants":                get_merchants,
     "summarize_spending":  summarize_spending,
     "get_spending_by_month": get_spending_by_month,
     "find_transactions":   find_transactions,
     "detect_duplicates":   detect_duplicates,
     "get_uncategorized":   get_uncategorized,
     "get_statements":      get_statements,
+    "get_subcategory_summary": get_subcategory_summary,
 }
 
 

@@ -64,6 +64,9 @@ class Transaction:
 MERCHANT_ALIASES: dict[str, list[str]] = {
     "Amazon":         ["amzn", "amazon", "amzn*mktp"],
     "Amazon Prime":   ["amazon prime"],
+    "Disney Plus":     ["disney plus"],
+    "Temu":           ["temu.com", "temuus"],
+    "Shein":          ["shein.com", "sheinus"],
     "Uber":           ["uber *trip", "uber trip"],
     "Uber Eats":      ["uber eats", "ubereats"],
     "Whole Foods":    ["wholefds", "whole foods", "whole foods market"],
@@ -71,7 +74,7 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Spotify":        ["spotify"],
     "Community Butcher": ["community butcher", "communitybutcher"],
     "Shell":          ["shell oil", "shell"],
-    "Public Trasportation": ["ozark regional transit"],
+    "Public Transportation": ["ozark regional transit"],
     "Great Clips":     ["great clips", "greatclips"],
     "Chevron":        ["chevron"],
     "Maverik":        ["maverik"],
@@ -81,7 +84,8 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Delta Airlines": ["delta air", "delta airlines"],
     "United Airlines":["united airlines", "united air"],
     "Jcpenny":        ["jcpenny"],
-    "Khols":          ["khols", "khols"],
+    "Khols":          ["khols"],
+    "Macys":          ["Macys"],
     "Marshalls":      ["marshalls"],
     "Starbucks":      ["starbucks"],
     "Taco Bell":      ["taco bell"],
@@ -90,12 +94,12 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Dunkin":         ["dunkin", "dd *dunkin"],
     "McDonald's":     ["mcdonalds", "mcdonald's"],
     "Popeyes":        ["popeyes"],
-    "Krispy Kreme":    ["krispy krime"],
+    "Krispy Kreme":    ["krispy kreme"],
     "Burger King":    ["burgerking"],
     "Blue Bottle Coffee": ["blue bottle", "bluebottle coffee"],
     "Target":         ["target"],
     "Braums":         ["braums", "Braums"],
-    "Landers":        ["landers", "landers", "landers"],
+    "Landers":        ["landers"],
     "Walmart":        ["walmart", "wm supercenter", "wm neighborhood"],
     "Sams Club":      ["sams club"],
     "Aldi":           ["aldi"],
@@ -106,20 +110,23 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "India Mart":     ["india mart", "indiamart", "namaste"],
     "Asian Amigo":    ["asian amigo", "achau"],
     "Bentonville Utilities": ["city of "],
+    "Bentonville Community Center": ["act*bentonville"],
     "Planet Fitness": ["planet fitness"],
     "Bawarchi":      ["bawarchi"],
     "PayPal":         ["paypal"],
     "Capital One":    ["Capital One"],
-    "Credit Re-Payment": ["online payment", "online payment" "Payment Thankyou"],
+    "Credit Re-Payment": ["online payment", "Payment Thankyou"],
     "Credit Cashback": ["credit reward", "credit travel"],
     "Venmo":          ["venmo"],
     "eBay":           ["ebay"],
     "Chase ATM":      ["atm withdrawal chase", "chase bank"],
     "ATT":           ["att", "att wireless","att*bill"],
     "Ultra Wireless": ["ultra wireless", "ultra"],
-    "Insurance": ["geico Auto", "statefarm"],
-    "Landers": ["landers"],
-    "Discount Tires": ["discount tires"]
+    "Geico":     ["geico"],
+    "State Farm": ["statefarm", "state farm"],
+    "Discount Tires": ["discount tires"],
+    "Guess Who": ["guesswho"],
+    "Bentonville Eye Care": ["eyecare"]
 }
 
 # Noise patterns to strip before matching
@@ -167,11 +174,15 @@ def normalize_merchant(
     """
     cleaned = clean_description(raw)
 
-    # Build alias lookup once (shared by layers 2 and 3)
+    # Build alias lookup for fuzzy matching — exclude short aliases (< 6 chars)
+    # because partial_ratio on short strings produces too many false positives
+    # (e.g. "GEICO" matching "RIDGECO" in "BreckenridgeCO").
+    # Layer 1 substring match handles short aliases reliably when they truly appear.
     all_aliases = [
         (alias, canonical)
         for canonical, aliases in MERCHANT_ALIASES.items()
         for alias in aliases
+        if len(alias) >= 6
     ]
     alias_strings = [a[0].upper() for a in all_aliases]
 
@@ -221,13 +232,13 @@ def normalize_merchant(
 # Category taxonomy: category → (subcategory → merchant set)
 CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
     "Shopping": {
-        "Online":    {"Amazon", "eBay", "PayPal","Michael Kors", "Coach", "Hoka"},
-        "Retail":    {"Target", "Jcpenny", "Khols", "Marshalls", "Dollar-General", "Dollar-Tree", "Aldi", "Guess Who"},
+        "Online":    {"Amazon", "eBay", "PayPal","Michael Kors", "Coach", "Hoka", "Shein", "Temu"},
+        "Retail":    {"Target", "Jcpenny", "Khols", "Macys", "Marshalls", "Dollar-General",
+                      "Dollar-Tree", "Aldi", "GuessWho",},
     },
     "Utilities": {
         "Water and Electricity": {"Bentonville Utilities"},
         "Wireless & Internet": {"ATT", "Ultra Wireless"},
-        "Insurance": {"Insurance"}
     },
     "Entertainment": {
         "Movies & TV": {"Malco", "Hulu", "Netflix", "Amazon Prime", "Disney Plus"}
@@ -236,20 +247,20 @@ CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
         "Car Service": {"Landers"},
         "Car Tires": {"Discount Tires"},
     },
-    "Food & Dining": {
+    "Dining": {
         "Coffee":    {"Starbucks", "Dunkin", "Blue Bottle Coffee", "Krispy Kreme"},
         "Fast Food": {"McDonald's", "Popeyes", "Burger King", "Chipotle", "Chick-Fil-A", "Taco Bell"},
         "Restaurant":{"Chipotle", "Olive Garden", "Bawarchi", "Cuisine", "Panera", "Taj"},
         "Delivery":  {"Uber Eats"},
     },
     "Transportation": {
-        "Rideshare": {"Uber"},
+        "Rideshare": {"Uber", "Public Transportation"},
         "Airlines":  {"Delta Airlines", "United Airlines"},
         "Gas":       {"Shell", "Chevron", "Maverik", "Phillips"},
     },
     "Kids Related": {
         "Gymnastics":   {"Planet Fitness","Infiniti", "Fastlane", "Altitude", },
-        "Swimming": {"ACT Bentonville"}
+        "BCC Lessons": {"Bentonville Community Center"}
     },
     "Groceries": {
         "Supermarket": {"Whole Foods", "Walmart", "Sams Club","Aldi"},
@@ -259,14 +270,17 @@ CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
     "Banking": {
         "Credit Card": {"Capital One", "Citi", "Bofa", "Robinhood", "Card Payment", "Credit Re-Payment", "Credit Cashback",},
     },
-    "Health & Beauty": {
+    "Medical & Beauty": {
         "Pharmacy":  {"CVS Pharmacy", "Walgreens"},
         "Beauty":   {"Great Clips"},
-        "Hospitals": {"Mercy", "Washington Regional", "North West Medical", "North West Health"}
+        "Hospitals": {"Mercy", "Washington Regional", "North West Medical", "North West Health", "Bentonville Eye Care"}
     },
     "Transfers & ATM": {
         "ATM":       {"Chase ATM"},
-        "P2P":       {"Venmo"},
+        "P2P":       {"Venmo", "zelle"},
+    },
+    "Insurance": {
+        "Insurance": {"Geico", "State Farm"},
     },
 }
 

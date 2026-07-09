@@ -62,6 +62,8 @@ python watcher.py
 
 # Override the folder for this run only
 python watcher.py /path/to/statements
+# 2026-04-22 --> use this to load the new credit card statements  
+python watcher.py /Users/sivakumarprabhakaran/statements
 
 # Preview without writing to DB
 python watcher.py --dry-run
