@@ -1,15 +1,11 @@
 """
 src/agent/unified_tools.py
 
-Unified tool registry combining credit card tools and bank tools.
+Unified tool registry combining credit card, bank, portfolio, and live card tools.
 
 Provides:
   - ALL_TOOL_DEFINITIONS: merged list for LLM function calling
   - execute_any_tool(name, db, **kwargs): single dispatcher for all tools
-
-This module replaces the need to import from both tools.py and bank_tools.py
-separately. The agent/graph just calls execute_any_tool() and it routes to
-the correct handler.
 """
 
 from __future__ import annotations
@@ -28,24 +24,28 @@ from src.agent.portfolio_tools import (
     PORTFOLIO_TOOL_DEFINITIONS,
     execute_portfolio_tool as _execute_portfolio_tool,
 )
+from src.agent.live_card_tools import (
+    LIVE_CARD_TOOL_DEFINITIONS,
+    LIVE_CARD_TOOL_HANDLERS,
+)
 
 
 # ---------------------------------------------------------------------------
 # Merged tool definitions
 # ---------------------------------------------------------------------------
 
-ALL_TOOL_DEFINITIONS = CREDIT_TOOL_DEFINITIONS + BANK_TOOL_DEFINITIONS + PORTFOLIO_TOOL_DEFINITIONS
+ALL_TOOL_DEFINITIONS = (
+    CREDIT_TOOL_DEFINITIONS
+    + BANK_TOOL_DEFINITIONS
+    + PORTFOLIO_TOOL_DEFINITIONS
+    + LIVE_CARD_TOOL_DEFINITIONS
+)
 
 # Build name→source lookup for routing
-_CREDIT_TOOL_NAMES = {
-    t["function"]["name"] for t in CREDIT_TOOL_DEFINITIONS
-}
-_BANK_TOOL_NAMES = {
-    t["function"]["name"] for t in BANK_TOOL_DEFINITIONS
-}
-_PORTFOLIO_TOOL_NAMES = {
-    t["function"]["name"] for t in PORTFOLIO_TOOL_DEFINITIONS
-}
+_CREDIT_TOOL_NAMES = {t["function"]["name"] for t in CREDIT_TOOL_DEFINITIONS}
+_BANK_TOOL_NAMES = {t["function"]["name"] for t in BANK_TOOL_DEFINITIONS}
+_PORTFOLIO_TOOL_NAMES = {t["function"]["name"] for t in PORTFOLIO_TOOL_DEFINITIONS}
+_LIVE_CARD_TOOL_NAMES = {t["function"]["name"] for t in LIVE_CARD_TOOL_DEFINITIONS}
 
 
 # ---------------------------------------------------------------------------
@@ -54,12 +54,11 @@ _PORTFOLIO_TOOL_NAMES = {
 
 def execute_any_tool(name: str, db, **kwargs) -> Any:
     """
-    Execute a tool by name, routing to the credit card, bank, or portfolio handler.
+    Execute a tool by name, routing to the correct handler.
 
     Args:
-        name: Tool function name (e.g. 'get_categories', 'get_bank_balance',
-              'get_portfolio_summary')
-        db: Database manager (DatabaseManager or DualWriteManager)
+        name: Tool function name
+        db:   Database manager (DatabaseManager or DualWriteManager)
         **kwargs: Tool-specific arguments
 
     Returns:
@@ -68,13 +67,21 @@ def execute_any_tool(name: str, db, **kwargs) -> Any:
     Raises:
         KeyError: If tool name is not registered in any set
     """
+    if name in _LIVE_CARD_TOOL_NAMES:
+        # Live card tools don't need db — they call Plaid directly
+        handler = LIVE_CARD_TOOL_HANDLERS[name]
+        return handler(**kwargs)
     if name in _CREDIT_TOOL_NAMES:
         return _execute_credit_tool(name, db, **kwargs)
     if name in _BANK_TOOL_NAMES:
         return _execute_bank_tool(name, db, **kwargs)
     if name in _PORTFOLIO_TOOL_NAMES:
         return _execute_portfolio_tool(name, db, **kwargs)
-    raise KeyError(
-        f"Unknown tool: {name}. "
-        f"Available: {sorted(_CREDIT_TOOL_NAMES | _BANK_TOOL_NAMES | _PORTFOLIO_TOOL_NAMES)}"
+
+    all_names = sorted(
+        _CREDIT_TOOL_NAMES
+        | _BANK_TOOL_NAMES
+        | _PORTFOLIO_TOOL_NAMES
+        | _LIVE_CARD_TOOL_NAMES
     )
+    raise KeyError(f"Unknown tool: {name}. Available: {all_names}")
