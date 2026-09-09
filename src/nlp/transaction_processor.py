@@ -76,6 +76,7 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Shell":          ["shell oil", "shell"],
     "Public Transportation": ["ozark regional transit"],
     "Great Clips":     ["great clips", "greatclips"],
+    "BoysAndGirlsClub":  ["Boys and Girls Club"],
     "Chevron":        ["chevron"],
     "Maverik":        ["maverik"],
     "Phillips":        ["phillips 66"],
@@ -96,6 +97,7 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Popeyes":        ["popeyes"],
     "Krispy Kreme":    ["krispy kreme"],
     "Burger King":    ["burgerking"],
+    "Panda Express":    ["panda express"],
     "Blue Bottle Coffee": ["blue bottle", "bluebottle coffee"],
     "Target":         ["target"],
     "Braums":         ["braums", "Braums"],
@@ -113,6 +115,7 @@ MERCHANT_ALIASES: dict[str, list[str]] = {
     "Bentonville Community Center": ["act*bentonville"],
     "Planet Fitness": ["planet fitness"],
     "Bawarchi":      ["bawarchi"],
+    "Jai Kitchen":      ["Jai Indian Kitchen"],
     "PayPal":         ["paypal"],
     "Capital One":    ["Capital One"],
     "Credit Re-Payment": ["online payment", "Payment Thankyou"],
@@ -241,7 +244,7 @@ CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
         "Wireless & Internet": {"ATT", "Ultra Wireless"},
     },
     "Entertainment": {
-        "Movies & TV": {"Malco", "Hulu", "Netflix", "Amazon Prime", "Disney Plus"}
+        "Movies & TV": {"Malco", "Hulu", "Netflix", "Amazon Prime", "Disney Plus", "Zoo"}
     },
     "Car Related": {
         "Car Service": {"Landers"},
@@ -249,8 +252,8 @@ CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
     },
     "Dining": {
         "Coffee":    {"Starbucks", "Dunkin", "Blue Bottle Coffee", "Krispy Kreme"},
-        "Fast Food": {"McDonald's", "Popeyes", "Burger King", "Chipotle", "Chick-Fil-A", "Taco Bell"},
-        "Restaurant":{"Chipotle", "Olive Garden", "Bawarchi", "Cuisine", "Panera", "Taj"},
+        "Fast Food": {"McDonald's", "Popeyes", "Burger King", "Chipotle", "Chick-Fil-A", "Taco Bell", "Panda Express"},
+        "Restaurant":{"Chipotle", "Olive Garden", "Bawarchi", "Cuisine", "Panera", "Taj", "Jai Kitchen"},
         "Delivery":  {"Uber Eats"},
     },
     "Transportation": {
@@ -260,7 +263,7 @@ CATEGORY_RULES: dict[str, dict[str, set[str]]] = {
     },
     "Kids Related": {
         "Gymnastics":   {"Planet Fitness","Infiniti", "Fastlane", "Altitude", },
-        "BCC Lessons": {"Bentonville Community Center"}
+        "BCC & SummerCamp": {"Bentonville Community Center", "BoysAndGirlsClub"}
     },
     "Groceries": {
         "Supermarket": {"Whole Foods", "Walmart", "Sams Club","Aldi"},

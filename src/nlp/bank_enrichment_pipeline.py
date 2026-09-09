@@ -78,6 +78,7 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
         "DIGITAL FEDERAL A2A",      # DCU → Chase A2A transfers
         "BANK OF AMERICA P2P",      # BOA → Chase P2P transfers
         "A2A XFER",
+        "TRANSFER", "TRNSFR"
     ],
     "Utilities": [
         "EVERSOURCE", "ELECTRIC", "GAS BILL", "WATER BILL",
@@ -85,7 +86,7 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
         "CITY OF", "BENTONVILLE",
     ],
     "Rent & Mortgage": [
-        "RENT", "MORTGAGE", "HOUSING", "LEASE", "WALTONCROSSINGS",
+        "RENT", "MORTGAGE", "HOUSING", "LEASE", "WALTONCROSSINGAP",
     ],
     "Insurance": [
         "INSURANCE", "GEICO", "STATEFARM", "STATE FARM",
@@ -102,7 +103,7 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
     ],
     "Credit Card Payment": ["CITI CARD", "ROBINHOOD CARD"],
     "ATM": [
-        "ATM WITHDRAWAL", "ATM DEPOSIT", "ATM",
+        "ATM WITHDRAWAL", "ATM DEPOSIT", "ATM", "WITHDRWL"
     ],
     "Fee": [
         "SERVICE FEE", "MONTHLY FEE", "OVERDRAFT", "NSF FEE",
@@ -122,7 +123,7 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
     ],
     "Healthcare": [
         "PHARMACY", "CVS", "WALGREENS", "DOCTOR", "MEDICAL",
-        "HOSPITAL", "DENTAL", "HEALTH",
+        "HOSPITAL", "DENTAL", "HEALTH", "MANA"
     ],
     "Venmo / P2P": [
         "VENMO", "ZELLE", "CASH APP", "CASHAPP",
@@ -130,6 +131,8 @@ BANK_CATEGORY_RULES: dict[str, list[str]] = {
     "Check": [
         "CHECK #", "CHECK NO", "CHK",
     ],
+    "Verida reimbursement": ["SOUTHEASTRANS"],
+    "Tax": ["USATAX", "ARSTTAX"],
 }
 
 
